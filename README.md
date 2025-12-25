@@ -209,6 +209,44 @@ async with KaiClient(
     votes = await client.get_votes(chat_id="chat-uuid")
 ```
 
+### Tool Approval for Write Operations
+
+Some tools (like `create_config`, `run_job`, `create_flow`) require explicit approval before execution:
+
+```python
+async with KaiClient(
+    storage_api_token="your-token",
+    storage_api_url="https://connection.keboola.com"
+) as client:
+    chat_id = client.new_chat_id()
+    pending_approval = None
+
+    async for event in client.send_message(chat_id, "Create a new bucket"):
+        if event.type == "text":
+            print(event.text, end="")
+        elif event.type == "tool-call":
+            if event.state == "input-available":
+                # Tool is waiting for approval
+                print(f"\nTool {event.tool_name} needs approval")
+                pending_approval = event
+            elif event.state == "output-available":
+                print(f"\nTool {event.tool_name} completed")
+
+    # Approve the pending tool call
+    if pending_approval:
+        async for event in client.confirm_tool(
+            chat_id=chat_id,
+            tool_call_id=pending_approval.tool_call_id,
+            tool_name=pending_approval.tool_name,
+        ):
+            if event.type == "text":
+                print(event.text, end="")
+
+    # Or deny it
+    # async for event in client.deny_tool(chat_id, tool_call_id, tool_name):
+    #     ...
+```
+
 ### Using SSE Stream Parser
 
 ```python
@@ -297,6 +335,9 @@ KaiClient(
 | `ping()` | Check server health |
 | `info()` | Get server information |
 | `send_message(chat_id, text, ...)` | Send a message and stream response |
+| `send_tool_result(chat_id, tool_call_id, ...)` | Send tool approval/denial result |
+| `confirm_tool(chat_id, tool_call_id, ...)` | Approve a pending tool call |
+| `deny_tool(chat_id, tool_call_id, ...)` | Deny a pending tool call |
 | `chat(text, ...)` | Simple non-streaming chat |
 | `get_chat(chat_id)` | Get chat details with messages |
 | `get_history(limit, ...)` | Get chat history |

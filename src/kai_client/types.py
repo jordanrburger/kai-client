@@ -80,5 +80,5 @@ PartType = Union["TextPart", "ToolResultPart", "ToolCallPart", "StepStartPart"]
 
 # Forward references for circular imports
 if False:  # TYPE_CHECKING alternative that works at runtime
-    from kai_client.models import TextPart, ToolResultPart, ToolCallPart, StepStartPart
+    from kai_client.models import StepStartPart, TextPart, ToolCallPart, ToolResultPart
 

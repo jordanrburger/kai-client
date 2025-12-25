@@ -1,6 +1,5 @@
 """Tests for SSE stream parser."""
 
-import pytest
 
 from kai_client.models import (
     ErrorEvent,

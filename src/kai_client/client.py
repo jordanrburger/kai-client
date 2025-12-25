@@ -19,13 +19,13 @@ from kai_client.models import (
     ChatRequest,
     HistoryResponse,
     InfoResponse,
-    Message,
     MessageMetadata,
     MessageRequest,
     PingResponse,
     RequestContext,
     SSEEvent,
     TextPart,
+    ToolResultPart,
     Vote,
     VoteRequest,
 )
@@ -445,6 +445,158 @@ class KaiClient:
         async with self._stream_request("POST", "/api/chat", json=payload) as response:
             async for event in parse_sse_stream(response):
                 yield event
+
+    async def send_tool_result(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        result: str,
+        *,
+        model: str | ChatModel = ChatModel.CHAT,
+        visibility: str | VisibilityType = VisibilityType.PRIVATE,
+        branch_id: Optional[int] = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """
+        Send a tool result to confirm or deny a pending tool call.
+
+        When the AI requests to execute a tool that requires approval (like
+        write operations), the stream will pause with a tool-call event in
+        "input-available" state. Use this method to approve or deny the tool
+        execution and continue the stream.
+
+        Args:
+            chat_id: The chat session ID.
+            tool_call_id: The ID of the tool call to respond to (from the event).
+            tool_name: The name of the tool (from the event).
+            result: The result to send - typically "confirmed" or "denied".
+            model: The chat model to use (should match the original request).
+            visibility: Chat visibility (should match the original request).
+            branch_id: Optional Keboola branch ID.
+
+        Yields:
+            SSE events from the continued response stream.
+
+        Example:
+            ```python
+            chat_id = client.new_chat_id()
+            async for event in client.send_message(chat_id, "Create a new bucket"):
+                if event.type == "tool-call" and event.state == "input-available":
+                    # Tool requires approval - confirm it
+                    async for result_event in client.confirm_tool(
+                        chat_id=chat_id,
+                        tool_call_id=event.tool_call_id,
+                        tool_name=event.tool_name,
+                    ):
+                        if result_event.type == "text":
+                            print(result_event.text, end="")
+                elif event.type == "text":
+                    print(event.text, end="")
+            ```
+        """
+        # Build the request with a tool-result part
+        request = ChatRequest(
+            id=chat_id,
+            message=MessageRequest(
+                id=self.new_message_id(),
+                role="user",
+                parts=[
+                    ToolResultPart(
+                        type="tool-result",
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        result=result,
+                    )
+                ],
+            ),
+            selected_chat_model=str(model.value if isinstance(model, ChatModel) else model),
+            selected_visibility_type=str(
+                visibility.value if isinstance(visibility, VisibilityType) else visibility
+            ),
+            branch_id=branch_id,
+        )
+
+        # Serialize with aliases
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        async with self._stream_request("POST", "/api/chat", json=payload) as response:
+            async for event in parse_sse_stream(response):
+                yield event
+
+    async def confirm_tool(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        *,
+        model: str | ChatModel = ChatModel.CHAT,
+        visibility: str | VisibilityType = VisibilityType.PRIVATE,
+        branch_id: Optional[int] = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """
+        Confirm a pending tool call and continue the stream.
+
+        This is a convenience method that calls send_tool_result with "confirmed".
+
+        Args:
+            chat_id: The chat session ID.
+            tool_call_id: The ID of the tool call to confirm.
+            tool_name: The name of the tool.
+            model: The chat model to use.
+            visibility: Chat visibility.
+            branch_id: Optional Keboola branch ID.
+
+        Yields:
+            SSE events from the continued response stream.
+        """
+        async for event in self.send_tool_result(
+            chat_id=chat_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            result="confirmed",
+            model=model,
+            visibility=visibility,
+            branch_id=branch_id,
+        ):
+            yield event
+
+    async def deny_tool(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        *,
+        model: str | ChatModel = ChatModel.CHAT,
+        visibility: str | VisibilityType = VisibilityType.PRIVATE,
+        branch_id: Optional[int] = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """
+        Deny a pending tool call and continue the stream.
+
+        This is a convenience method that calls send_tool_result with "denied".
+        The AI will typically acknowledge the denial and may suggest alternatives.
+
+        Args:
+            chat_id: The chat session ID.
+            tool_call_id: The ID of the tool call to deny.
+            tool_name: The name of the tool.
+            model: The chat model to use.
+            visibility: Chat visibility.
+            branch_id: Optional Keboola branch ID.
+
+        Yields:
+            SSE events from the continued response stream.
+        """
+        async for event in self.send_tool_result(
+            chat_id=chat_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            result="denied",
+            model=model,
+            visibility=visibility,
+            branch_id=branch_id,
+        ):
+            yield event
 
     async def get_chat(self, chat_id: str) -> ChatDetail:
         """
