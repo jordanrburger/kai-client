@@ -1,9 +1,6 @@
 """Tests for Pydantic models."""
 
-from datetime import datetime, timezone
-
-import pytest
-from pydantic import ValidationError
+from datetime import datetime
 
 from kai_client.models import (
     Chat,
@@ -14,7 +11,6 @@ from kai_client.models import (
     FinishEvent,
     HistoryResponse,
     InfoResponse,
-    Message,
     MessageMetadata,
     MessageRequest,
     PingResponse,
@@ -212,7 +208,8 @@ class TestInfoResponse:
         assert response.app_version == "1.0.0"
         assert response.server_version == "2.0.0"
         assert len(response.connected_mcp) == 1
-        assert response.connected_mcp[0].name == "keboola-mcp"
+        # connected_mcp is typed as Any, so items are dicts
+        assert response.connected_mcp[0]["name"] == "keboola-mcp"
 
 
 class TestChatModels:

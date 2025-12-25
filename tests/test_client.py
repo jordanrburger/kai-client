@@ -3,7 +3,6 @@
 import json
 import uuid
 
-import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -11,7 +10,6 @@ from kai_client import (
     KaiAuthenticationError,
     KaiBadRequestError,
     KaiClient,
-    KaiConnectionError,
     KaiError,
     KaiForbiddenError,
     KaiNotFoundError,
@@ -570,4 +568,230 @@ class TestChat:
             chat_id, _ = await client.chat("Test", chat_id="existing-chat-id")
 
         assert chat_id == "existing-chat-id"
+
+
+class TestToolApproval:
+    """Tests for tool approval functionality."""
+
+    @pytest.mark.asyncio
+    async def test_send_tool_result_request_format(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that send_tool_result sends correctly formatted request."""
+        sse_response = (
+            'data: {"type":"text","text":"Tool executed successfully."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = []
+            async for event in client.send_tool_result(
+                chat_id="chat-123",
+                tool_call_id="tool-call-456",
+                tool_name="create_bucket",
+                result="confirmed",
+            ):
+                events.append(event)
+
+        # Verify request format
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+
+        assert body["id"] == "chat-123"
+        assert body["message"]["role"] == "user"
+        assert len(body["message"]["parts"]) == 1
+
+        part = body["message"]["parts"][0]
+        assert part["type"] == "tool-result"
+        assert part["toolCallId"] == "tool-call-456"
+        assert part["toolName"] == "create_bucket"
+        assert part["result"] == "confirmed"
+
+    @pytest.mark.asyncio
+    async def test_send_tool_result_denied(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test sending a denial result."""
+        sse_response = (
+            'data: {"type":"text","text":"Understood, I won\'t proceed."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = []
+            async for event in client.send_tool_result(
+                chat_id="chat-123",
+                tool_call_id="tool-call-456",
+                tool_name="delete_bucket",
+                result="denied",
+            ):
+                events.append(event)
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["message"]["parts"][0]["result"] == "denied"
+
+    @pytest.mark.asyncio
+    async def test_confirm_tool_sends_confirmed(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that confirm_tool sends 'confirmed' as the result."""
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.confirm_tool(
+                chat_id="chat-123",
+                tool_call_id="tool-456",
+                tool_name="run_job",
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["message"]["parts"][0]["result"] == "confirmed"
+        assert body["message"]["parts"][0]["toolCallId"] == "tool-456"
+        assert body["message"]["parts"][0]["toolName"] == "run_job"
+
+    @pytest.mark.asyncio
+    async def test_deny_tool_sends_denied(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that deny_tool sends 'denied' as the result."""
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.deny_tool(
+                chat_id="chat-123",
+                tool_call_id="tool-789",
+                tool_name="create_config",
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["message"]["parts"][0]["result"] == "denied"
+        assert body["message"]["parts"][0]["toolCallId"] == "tool-789"
+        assert body["message"]["parts"][0]["toolName"] == "create_config"
+
+    @pytest.mark.asyncio
+    async def test_tool_result_streams_events(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that tool result properly streams response events."""
+        tool_event = (
+            '{"type":"tool-call","toolCallId":"tool-456","toolName":"create_bucket",'
+            '"state":"output-available","output":{"bucket_id":"new-bucket"}}'
+        )
+        sse_response = (
+            f'data: {tool_event}\n'
+            'data: {"type":"text","text":"I created the bucket."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = []
+            async for event in client.confirm_tool(
+                chat_id="chat-123",
+                tool_call_id="tool-456",
+                tool_name="create_bucket",
+            ):
+                events.append(event)
+
+        assert len(events) == 3
+        assert events[0].type == "tool-call"
+        assert events[0].state == "output-available"
+        assert events[1].type == "text"
+        assert events[1].text == "I created the bucket."
+        assert events[2].type == "finish"
+
+    @pytest.mark.asyncio
+    async def test_tool_result_with_custom_model(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that tool result respects custom model parameter."""
+        from kai_client import ChatModel
+
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.send_tool_result(
+                chat_id="chat-123",
+                tool_call_id="tool-456",
+                tool_name="some_tool",
+                result="confirmed",
+                model=ChatModel.REASONING,
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["selectedChatModel"] == "chat-model-reasoning"
+
+    @pytest.mark.asyncio
+    async def test_tool_result_includes_auth_headers(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that tool result requests include authentication headers."""
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.confirm_tool(
+                chat_id="chat-123",
+                tool_call_id="tool-456",
+                tool_name="test_tool",
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        assert request.headers["x-storageapi-token"] == "test-token"
+        assert request.headers["x-storageapi-url"] == "https://connection.test.keboola.com"
 

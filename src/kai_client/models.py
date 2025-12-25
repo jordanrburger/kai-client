@@ -5,7 +5,6 @@ from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # =============================================================================
 # Message Part Models (for discriminated union)
 # =============================================================================
@@ -32,7 +31,7 @@ class StepStartPart(BaseModel):
 class ToolResultPart(BaseModel):
     """Result from a tool execution."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     type: Literal["tool-result"] = "tool-result"
     tool_call_id: str = Field(alias="toolCallId")
@@ -94,7 +93,7 @@ class MessageRequest(BaseModel):
 
     id: str
     role: Literal["user"] = "user"
-    parts: list[TextPart]
+    parts: list[Union[TextPart, ToolResultPart]]
     metadata: Optional[MessageMetadata] = None
 
 

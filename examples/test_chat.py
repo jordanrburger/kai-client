@@ -15,7 +15,7 @@ if env_file.exists():
             key, value = line.split("=", 1)
             os.environ[key.strip()] = value.strip()
 
-from kai_client import KaiClient
+from kai_client import KaiClient  # noqa: E402
 
 
 async def main():
