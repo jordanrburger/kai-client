@@ -82,3 +82,4 @@ PartType = Union["TextPart", "ToolResultPart", "ToolCallPart", "StepStartPart"]
 if False:  # TYPE_CHECKING alternative that works at runtime
     from kai_client.models import StepStartPart, TextPart, ToolCallPart, ToolResultPart
 
+

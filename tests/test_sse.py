@@ -283,3 +283,4 @@ class TestSSEStreamParser:
         assert parser.finished is True
         assert parser.finish_reason == "stop"
 
+

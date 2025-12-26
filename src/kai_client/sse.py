@@ -258,3 +258,4 @@ class SSEStreamParser:
             if yield_events:
                 yield event
 
+
