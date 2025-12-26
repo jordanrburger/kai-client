@@ -795,3 +795,4 @@ class TestToolApproval:
         assert request.headers["x-storageapi-token"] == "test-token"
         assert request.headers["x-storageapi-url"] == "https://connection.test.keboola.com"
 
+

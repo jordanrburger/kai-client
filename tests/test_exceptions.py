@@ -212,3 +212,4 @@ class TestRaiseForErrorResponse:
             raise_for_error_response(response_data)
         assert exc_info.value.response_data == response_data
 
+
