@@ -1,0 +1,443 @@
+"""Command-line interface for the Kai client."""
+
+import asyncio
+import json
+import os
+import sys
+from typing import Optional
+
+import click
+
+from kai_client import KaiClient, __version__
+from kai_client.types import ChatModel, VoteType
+
+
+def get_env_or_error(name: str) -> str:
+    """Get environment variable or exit with error."""
+    value = os.environ.get(name)
+    if not value:
+        click.echo(f"Error: {name} environment variable is required", err=True)
+        click.echo(f"Set it with: export {name}=your-value", err=True)
+        sys.exit(1)
+    return value
+
+
+def run_async(coro):
+    """Run an async coroutine."""
+    return asyncio.run(coro)
+
+
+@click.group()
+@click.version_option(version=__version__, prog_name="kai")
+@click.option(
+    "--token",
+    envvar="STORAGE_API_TOKEN",
+    help="Keboola Storage API token (or set STORAGE_API_TOKEN env var)",
+)
+@click.option(
+    "--url",
+    envvar="STORAGE_API_URL",
+    help="Keboola Storage API URL (or set STORAGE_API_URL env var)",
+)
+@click.option(
+    "--base-url",
+    envvar="KAI_BASE_URL",
+    help="Kai API base URL for local development (default: auto-discover)",
+)
+@click.pass_context
+def main(ctx, token: Optional[str], url: Optional[str], base_url: Optional[str]):
+    """
+    Kai CLI - Command-line interface for the Keboola AI Assistant.
+
+    Requires STORAGE_API_TOKEN and STORAGE_API_URL environment variables,
+    or use --token and --url options.
+
+    Examples:
+
+        # Check server health
+        kai ping
+
+        # Start an interactive chat
+        kai chat
+
+        # Send a single message
+        kai chat -m "What tables do I have?"
+
+        # View chat history
+        kai history
+
+        # Get details of a specific chat
+        kai get-chat <chat-id>
+    """
+    ctx.ensure_object(dict)
+    ctx.obj["token"] = token
+    ctx.obj["url"] = url
+    ctx.obj["base_url"] = base_url
+
+
+async def get_client(ctx) -> KaiClient:
+    """Create and return a KaiClient from context."""
+    token = ctx.obj.get("token") or get_env_or_error("STORAGE_API_TOKEN")
+    url = ctx.obj.get("url") or get_env_or_error("STORAGE_API_URL")
+    base_url = ctx.obj.get("base_url")
+
+    if base_url:
+        # Local development mode
+        return KaiClient(
+            storage_api_token=token,
+            storage_api_url=url,
+            base_url=base_url,
+        )
+    else:
+        # Production mode - auto-discover URL
+        return await KaiClient.from_storage_api(
+            storage_api_token=token,
+            storage_api_url=url,
+        )
+
+
+@main.command()
+@click.pass_context
+def ping(ctx):
+    """Check if the Kai server is alive."""
+
+    async def _ping():
+        client = await get_client(ctx)
+        async with client:
+            response = await client.ping()
+            click.echo(f"Server is alive: {response.timestamp.isoformat()}")
+
+    run_async(_ping())
+
+
+@main.command()
+@click.pass_context
+def info(ctx):
+    """Get server information."""
+
+    async def _info():
+        client = await get_client(ctx)
+        async with client:
+            response = await client.info()
+            click.echo(f"App: {response.app_name} v{response.app_version}")
+            click.echo(f"Server: v{response.server_version}")
+            click.echo(f"Uptime: {response.uptime:.1f}s")
+            click.echo(f"Connected MCP servers: {len(response.connected_mcp)}")
+            for mcp in response.connected_mcp:
+                if isinstance(mcp, dict):
+                    click.echo(f"  - {mcp.get('name', 'unknown')}: {mcp.get('status', 'unknown')}")
+
+    run_async(_info())
+
+
+@main.command()
+@click.option("-m", "--message", help="Send a single message instead of interactive mode")
+@click.option(
+    "--chat-id",
+    help="Continue an existing chat (default: new chat)",
+)
+@click.option(
+    "--model",
+    type=click.Choice(["chat", "reasoning"]),
+    default="chat",
+    help="Model to use (default: chat)",
+)
+@click.option(
+    "--auto-approve",
+    is_flag=True,
+    help="Automatically approve tool calls that require confirmation",
+)
+@click.option(
+    "--json-output",
+    is_flag=True,
+    help="Output raw JSON events instead of formatted text",
+)
+@click.pass_context
+def chat(
+    ctx,
+    message: Optional[str],
+    chat_id: Optional[str],
+    model: str,
+    auto_approve: bool,
+    json_output: bool,
+):
+    """
+    Start a chat with the Keboola AI Assistant.
+
+    In interactive mode, type your messages and press Enter to send.
+    Type 'exit' or 'quit' to end the chat, or press Ctrl+C.
+
+    Examples:
+
+        # Interactive chat
+        kai chat
+
+        # Single message
+        kai chat -m "Show me my tables"
+
+        # Continue existing chat
+        kai chat --chat-id abc-123 -m "Tell me more"
+
+        # Auto-approve tool calls
+        kai chat --auto-approve -m "Create a bucket called test"
+    """
+    chat_model = ChatModel.REASONING if model == "reasoning" else ChatModel.CHAT
+
+    async def _chat():
+        client = await get_client(ctx)
+        async with client:
+            nonlocal chat_id
+            if not chat_id:
+                chat_id = client.new_chat_id()
+                if not json_output:
+                    click.echo(f"Chat ID: {chat_id}")
+
+            if message:
+                # Single message mode
+                await send_and_display(
+                    client, chat_id, message, chat_model, auto_approve, json_output
+                )
+            else:
+                # Interactive mode
+                if not json_output:
+                    click.echo("Interactive chat mode. Type 'exit' to quit.")
+                    click.echo("-" * 50)
+
+                while True:
+                    try:
+                        user_input = click.prompt("You", default="", show_default=False)
+                        if user_input.lower() in ("exit", "quit", "q"):
+                            break
+                        if not user_input.strip():
+                            continue
+
+                        await send_and_display(
+                            client, chat_id, user_input, chat_model, auto_approve, json_output
+                        )
+                        if not json_output:
+                            click.echo()  # Blank line after response
+
+                    except click.exceptions.Abort:
+                        break
+
+                if not json_output:
+                    click.echo("\nChat ended.")
+
+    run_async(_chat())
+
+
+async def send_and_display(
+    client: KaiClient,
+    chat_id: str,
+    message: str,
+    model: ChatModel,
+    auto_approve: bool,
+    json_output: bool,
+):
+    """Send a message and display the response."""
+    pending_approval = None
+
+    async for event in client.send_message(chat_id, message, model=model):
+        if json_output:
+            click.echo(json.dumps(event.model_dump(), default=str))
+        else:
+            if event.type == "text":
+                click.echo(event.text, nl=False)
+            elif event.type == "step-start":
+                click.echo("\n[Processing...]", nl=False)
+            elif event.type == "tool-call":
+                if event.state == "started":
+                    click.echo(f"\n[Calling {event.tool_name}...]", nl=False)
+                elif event.state == "input-available":
+                    click.echo(f"\n[Tool {event.tool_name} requires approval]")
+                    pending_approval = event
+                elif event.state == "output-available":
+                    click.echo(f"\n[{event.tool_name} completed]", nl=False)
+            elif event.type == "finish":
+                if not json_output:
+                    click.echo()  # Final newline
+            elif event.type == "error":
+                click.echo(f"\n[Error: {event.message}]", err=True)
+
+    # Handle tool approval if needed
+    if pending_approval:
+        if auto_approve:
+            click.echo("[Auto-approving...]")
+            async for event in client.confirm_tool(
+                chat_id=chat_id,
+                tool_call_id=pending_approval.tool_call_id,
+                tool_name=pending_approval.tool_name or "unknown",
+                model=model,
+            ):
+                if json_output:
+                    click.echo(json.dumps(event.model_dump(), default=str))
+                else:
+                    if event.type == "text":
+                        click.echo(event.text, nl=False)
+                    elif event.type == "tool-call" and event.state == "output-available":
+                        click.echo(f"\n[{event.tool_name} completed]", nl=False)
+                    elif event.type == "finish":
+                        click.echo()
+        else:
+            # Interactive approval
+            if click.confirm("Approve this tool call?"):
+                async for event in client.confirm_tool(
+                    chat_id=chat_id,
+                    tool_call_id=pending_approval.tool_call_id,
+                    tool_name=pending_approval.tool_name or "unknown",
+                    model=model,
+                ):
+                    if json_output:
+                        click.echo(json.dumps(event.model_dump(), default=str))
+                    else:
+                        if event.type == "text":
+                            click.echo(event.text, nl=False)
+                        elif event.type == "tool-call" and event.state == "output-available":
+                            click.echo(f"\n[{event.tool_name} completed]", nl=False)
+                        elif event.type == "finish":
+                            click.echo()
+            else:
+                async for event in client.deny_tool(
+                    chat_id=chat_id,
+                    tool_call_id=pending_approval.tool_call_id,
+                    tool_name=pending_approval.tool_name or "unknown",
+                    model=model,
+                ):
+                    if json_output:
+                        click.echo(json.dumps(event.model_dump(), default=str))
+                    else:
+                        if event.type == "text":
+                            click.echo(event.text, nl=False)
+                        elif event.type == "finish":
+                            click.echo()
+
+
+@main.command()
+@click.option("-n", "--limit", default=10, help="Number of chats to show (default: 10)")
+@click.option("--json-output", is_flag=True, help="Output as JSON")
+@click.pass_context
+def history(ctx, limit: int, json_output: bool):
+    """View chat history."""
+
+    async def _history():
+        client = await get_client(ctx)
+        async with client:
+            response = await client.get_history(limit=limit)
+
+            if json_output:
+                chats = [chat.model_dump() for chat in response.chats]
+                click.echo(json.dumps({"chats": chats, "hasMore": response.has_more}, default=str))
+            else:
+                if not response.chats:
+                    click.echo("No chat history found.")
+                    return
+
+                for chat in response.chats:
+                    created = chat.created_at.strftime("%Y-%m-%d %H:%M") if chat.created_at else "?"
+                    title = chat.title or "(no title)"
+                    click.echo(f"{chat.id}  {created}  {title[:50]}")
+
+                if response.has_more:
+                    click.echo("\n... and more (use --limit to see more)")
+
+    run_async(_history())
+
+
+@main.command("get-chat")
+@click.argument("chat_id")
+@click.option("--json-output", is_flag=True, help="Output as JSON")
+@click.pass_context
+def get_chat(ctx, chat_id: str, json_output: bool):
+    """Get details of a specific chat including messages."""
+
+    async def _get_chat():
+        client = await get_client(ctx)
+        async with client:
+            chat = await client.get_chat(chat_id)
+
+            if json_output:
+                click.echo(json.dumps(chat.model_dump(), default=str))
+            else:
+                click.echo(f"Chat ID: {chat.id}")
+                click.echo(f"Title: {chat.title or '(no title)'}")
+                click.echo(f"Messages: {len(chat.messages)}")
+                click.echo("-" * 50)
+
+                for msg in chat.messages:
+                    role = msg.role.upper()
+                    click.echo(f"\n[{role}]")
+                    for part in msg.parts:
+                        if hasattr(part, "text"):
+                            click.echo(part.text)
+                        elif hasattr(part, "type"):
+                            click.echo(f"[{part.type}]")
+
+    run_async(_get_chat())
+
+
+@main.command("delete-chat")
+@click.argument("chat_id")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+@click.pass_context
+def delete_chat(ctx, chat_id: str, yes: bool):
+    """Delete a chat."""
+
+    if not yes:
+        if not click.confirm(f"Delete chat {chat_id}?"):
+            click.echo("Cancelled.")
+            return
+
+    async def _delete():
+        client = await get_client(ctx)
+        async with client:
+            await client.delete_chat(chat_id)
+            click.echo(f"Deleted chat {chat_id}")
+
+    run_async(_delete())
+
+
+@main.command()
+@click.argument("chat_id")
+@click.argument("message_id")
+@click.argument("vote_type", type=click.Choice(["up", "down"]))
+@click.pass_context
+def vote(ctx, chat_id: str, message_id: str, vote_type: str):
+    """Vote on a message (up or down)."""
+
+    async def _vote():
+        client = await get_client(ctx)
+        async with client:
+            vtype = VoteType.UP if vote_type == "up" else VoteType.DOWN
+            result = await client.vote(chat_id, message_id, vtype)
+            click.echo(f"Voted {result.type} on message {message_id}")
+
+    run_async(_vote())
+
+
+@main.command("get-votes")
+@click.argument("chat_id")
+@click.option("--json-output", is_flag=True, help="Output as JSON")
+@click.pass_context
+def get_votes(ctx, chat_id: str, json_output: bool):
+    """Get votes for a chat."""
+
+    async def _get_votes():
+        client = await get_client(ctx)
+        async with client:
+            votes = await client.get_votes(chat_id)
+
+            if json_output:
+                click.echo(json.dumps([v.model_dump() for v in votes], default=str))
+            else:
+                if not votes:
+                    click.echo("No votes found.")
+                    return
+
+                for v in votes:
+                    click.echo(f"{v.message_id}: {v.type}")
+
+    run_async(_get_votes())
+
+
+if __name__ == "__main__":
+    main()

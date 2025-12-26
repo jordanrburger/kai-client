@@ -4,6 +4,7 @@ A Python client library for interacting with the Keboola AI Assistant Backend AP
 
 ## Features
 
+- **Command-line interface** for quick interactions without writing code
 - **Async/await support** using `httpx`
 - **Server-Sent Events (SSE) streaming** for real-time chat responses
 - **Type-safe models** with Pydantic v2
@@ -64,6 +65,82 @@ async def main():
                 print(f"\n[Finished: {event.finish_reason}]")
 
 asyncio.run(main())
+```
+
+## Command-Line Interface
+
+The package includes a `kai` CLI for quick interactions without writing code.
+
+### Setup
+
+Set your credentials as environment variables:
+
+```bash
+export STORAGE_API_TOKEN="your-keboola-token"
+export STORAGE_API_URL="https://connection.keboola.com"
+```
+
+### Basic Commands
+
+```bash
+# Check server health
+kai ping
+
+# Get server info
+kai info
+
+# Start an interactive chat
+kai chat
+
+# Send a single message
+kai chat -m "What tables do I have?"
+
+# View chat history
+kai history
+
+# Get details of a specific chat
+kai get-chat <chat-id>
+
+# Delete a chat
+kai delete-chat <chat-id>
+
+# Vote on a message
+kai vote <chat-id> <message-id> up
+```
+
+### Chat Options
+
+```bash
+# Use the reasoning model
+kai chat --model reasoning -m "Solve this complex problem..."
+
+# Auto-approve tool calls (for automation)
+kai chat --auto-approve -m "Create a bucket called test-bucket"
+
+# Continue an existing conversation
+kai chat --chat-id abc-123 -m "Tell me more about that"
+
+# Output raw JSON events (for scripting)
+kai chat --json-output -m "List my tables"
+```
+
+### Local Development
+
+For local development, specify a custom base URL:
+
+```bash
+kai --base-url http://localhost:3000 chat -m "Hello"
+```
+
+### Help
+
+```bash
+# General help
+kai --help
+
+# Command-specific help
+kai chat --help
+kai history --help
 ```
 
 ### Local Development vs Production
@@ -407,4 +484,5 @@ uv run pytest tests/test_client.py
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
 
