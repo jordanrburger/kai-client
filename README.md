@@ -111,9 +111,6 @@ kai vote <chat-id> <message-id> up
 ### Chat Options
 
 ```bash
-# Use the reasoning model
-kai chat --model reasoning -m "Solve this complex problem..."
-
 # Auto-approve tool calls (for automation)
 kai chat --auto-approve -m "Create a bucket called test-bucket"
 
@@ -200,27 +197,6 @@ async with KaiClient(
         if event.type == "text":
             print(event.text, end="")
     print()
-```
-
-### Using Different Models
-
-```python
-from kai_client import KaiClient, ChatModel
-
-async with KaiClient(
-    storage_api_token="your-token",
-    storage_api_url="https://connection.keboola.com"
-) as client:
-    chat_id = client.new_chat_id()
-
-    # Use the reasoning model for complex tasks
-    async for event in client.send_message(
-        chat_id,
-        "Solve this step by step: If a train travels 120km in 2 hours...",
-        model=ChatModel.REASONING
-    ):
-        if event.type == "text":
-            print(event.text, end="")
 ```
 
 ### Handling Tool Calls

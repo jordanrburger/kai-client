@@ -740,36 +740,6 @@ class TestToolApproval:
         assert events[2].type == "finish"
 
     @pytest.mark.asyncio
-    async def test_tool_result_with_custom_model(
-        self, client: KaiClient, httpx_mock: HTTPXMock
-    ):
-        """Test that tool result respects custom model parameter."""
-        from kai_client import ChatModel
-
-        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
-
-        httpx_mock.add_response(
-            url="http://localhost:3000/api/chat",
-            method="POST",
-            content=sse_response.encode(),
-            headers={"content-type": "text/event-stream"},
-        )
-
-        async with client:
-            async for _ in client.send_tool_result(
-                chat_id="chat-123",
-                tool_call_id="tool-456",
-                tool_name="some_tool",
-                result="confirmed",
-                model=ChatModel.REASONING,
-            ):
-                pass
-
-        request = httpx_mock.get_request()
-        body = json.loads(request.content)
-        assert body["selectedChatModel"] == "chat-model-reasoning"
-
-    @pytest.mark.asyncio
     async def test_tool_result_includes_auth_headers(
         self, client: KaiClient, httpx_mock: HTTPXMock
     ):

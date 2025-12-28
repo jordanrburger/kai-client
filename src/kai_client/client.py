@@ -30,7 +30,7 @@ from kai_client.models import (
     VoteRequest,
 )
 from kai_client.sse import parse_sse_stream
-from kai_client.types import ChatModel, VisibilityType, VoteType
+from kai_client.types import VisibilityType, VoteType
 
 
 class KaiClient:
@@ -383,7 +383,6 @@ class KaiClient:
         chat_id: str,
         text: str,
         *,
-        model: str | ChatModel = ChatModel.CHAT,
         visibility: str | VisibilityType = VisibilityType.PRIVATE,
         branch_id: Optional[int] = None,
         hidden: bool = False,
@@ -398,7 +397,6 @@ class KaiClient:
         Args:
             chat_id: The chat session ID (use new_chat_id() to create one).
             text: The message text to send.
-            model: The chat model to use (default: chat-model).
             visibility: Chat visibility (default: private).
             branch_id: Optional Keboola branch ID.
             hidden: Whether the message should be hidden.
@@ -432,7 +430,7 @@ class KaiClient:
                 parts=[TextPart(type="text", text=text)],
                 metadata=metadata,
             ),
-            selected_chat_model=str(model.value if isinstance(model, ChatModel) else model),
+            selected_chat_model="chat-model",
             selected_visibility_type=str(
                 visibility.value if isinstance(visibility, VisibilityType) else visibility
             ),
@@ -453,7 +451,6 @@ class KaiClient:
         tool_name: str,
         result: str,
         *,
-        model: str | ChatModel = ChatModel.CHAT,
         visibility: str | VisibilityType = VisibilityType.PRIVATE,
         branch_id: Optional[int] = None,
     ) -> AsyncIterator[SSEEvent]:
@@ -470,7 +467,6 @@ class KaiClient:
             tool_call_id: The ID of the tool call to respond to (from the event).
             tool_name: The name of the tool (from the event).
             result: The result to send - typically "confirmed" or "denied".
-            model: The chat model to use (should match the original request).
             visibility: Chat visibility (should match the original request).
             branch_id: Optional Keboola branch ID.
 
@@ -509,7 +505,7 @@ class KaiClient:
                     )
                 ],
             ),
-            selected_chat_model=str(model.value if isinstance(model, ChatModel) else model),
+            selected_chat_model="chat-model",
             selected_visibility_type=str(
                 visibility.value if isinstance(visibility, VisibilityType) else visibility
             ),
@@ -529,7 +525,6 @@ class KaiClient:
         tool_call_id: str,
         tool_name: str,
         *,
-        model: str | ChatModel = ChatModel.CHAT,
         visibility: str | VisibilityType = VisibilityType.PRIVATE,
         branch_id: Optional[int] = None,
     ) -> AsyncIterator[SSEEvent]:
@@ -542,7 +537,6 @@ class KaiClient:
             chat_id: The chat session ID.
             tool_call_id: The ID of the tool call to confirm.
             tool_name: The name of the tool.
-            model: The chat model to use.
             visibility: Chat visibility.
             branch_id: Optional Keboola branch ID.
 
@@ -554,7 +548,6 @@ class KaiClient:
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             result="confirmed",
-            model=model,
             visibility=visibility,
             branch_id=branch_id,
         ):
@@ -566,7 +559,6 @@ class KaiClient:
         tool_call_id: str,
         tool_name: str,
         *,
-        model: str | ChatModel = ChatModel.CHAT,
         visibility: str | VisibilityType = VisibilityType.PRIVATE,
         branch_id: Optional[int] = None,
     ) -> AsyncIterator[SSEEvent]:
@@ -580,7 +572,6 @@ class KaiClient:
             chat_id: The chat session ID.
             tool_call_id: The ID of the tool call to deny.
             tool_name: The name of the tool.
-            model: The chat model to use.
             visibility: Chat visibility.
             branch_id: Optional Keboola branch ID.
 
@@ -592,7 +583,6 @@ class KaiClient:
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             result="denied",
-            model=model,
             visibility=visibility,
             branch_id=branch_id,
         ):
@@ -776,7 +766,6 @@ class KaiClient:
         text: str,
         *,
         chat_id: Optional[str] = None,
-        model: str | ChatModel = ChatModel.CHAT,
         visibility: str | VisibilityType = VisibilityType.PRIVATE,
         branch_id: Optional[int] = None,
     ) -> tuple[str, str]:
@@ -789,7 +778,6 @@ class KaiClient:
         Args:
             text: The message text to send.
             chat_id: Optional chat ID (generates new one if not provided).
-            model: The chat model to use.
             visibility: Chat visibility.
             branch_id: Optional Keboola branch ID.
 
@@ -810,7 +798,6 @@ class KaiClient:
         async for event in self.send_message(
             chat_id=chat_id,
             text=text,
-            model=model,
             visibility=visibility,
             branch_id=branch_id,
         ):

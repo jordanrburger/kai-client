@@ -9,7 +9,7 @@ from typing import Optional
 import click
 
 from kai_client import KaiClient, __version__
-from kai_client.types import ChatModel, VoteType
+from kai_client.types import VoteType
 
 
 def get_env_or_error(name: str) -> str:
@@ -137,12 +137,6 @@ def info(ctx):
     help="Continue an existing chat (default: new chat)",
 )
 @click.option(
-    "--model",
-    type=click.Choice(["chat", "reasoning"]),
-    default="chat",
-    help="Model to use (default: chat)",
-)
-@click.option(
     "--auto-approve",
     is_flag=True,
     help="Automatically approve tool calls that require confirmation",
@@ -157,7 +151,6 @@ def chat(
     ctx,
     message: Optional[str],
     chat_id: Optional[str],
-    model: str,
     auto_approve: bool,
     json_output: bool,
 ):
@@ -181,7 +174,6 @@ def chat(
         # Auto-approve tool calls
         kai chat --auto-approve -m "Create a bucket called test"
     """
-    chat_model = ChatModel.REASONING if model == "reasoning" else ChatModel.CHAT
 
     async def _chat():
         client = await get_client(ctx)
@@ -195,7 +187,7 @@ def chat(
             if message:
                 # Single message mode
                 await send_and_display(
-                    client, chat_id, message, chat_model, auto_approve, json_output
+                    client, chat_id, message, auto_approve, json_output
                 )
             else:
                 # Interactive mode
@@ -212,7 +204,7 @@ def chat(
                             continue
 
                         await send_and_display(
-                            client, chat_id, user_input, chat_model, auto_approve, json_output
+                            client, chat_id, user_input, auto_approve, json_output
                         )
                         if not json_output:
                             click.echo()  # Blank line after response
@@ -230,14 +222,13 @@ async def send_and_display(
     client: KaiClient,
     chat_id: str,
     message: str,
-    model: ChatModel,
     auto_approve: bool,
     json_output: bool,
 ):
     """Send a message and display the response."""
     pending_approval = None
 
-    async for event in client.send_message(chat_id, message, model=model):
+    async for event in client.send_message(chat_id, message):
         if json_output:
             click.echo(json.dumps(event.model_dump(), default=str))
         else:
@@ -267,7 +258,6 @@ async def send_and_display(
                 chat_id=chat_id,
                 tool_call_id=pending_approval.tool_call_id,
                 tool_name=pending_approval.tool_name or "unknown",
-                model=model,
             ):
                 if json_output:
                     click.echo(json.dumps(event.model_dump(), default=str))
@@ -285,7 +275,6 @@ async def send_and_display(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
                     tool_name=pending_approval.tool_name or "unknown",
-                    model=model,
                 ):
                     if json_output:
                         click.echo(json.dumps(event.model_dump(), default=str))
@@ -301,7 +290,6 @@ async def send_and_display(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
                     tool_name=pending_approval.tool_name or "unknown",
-                    model=model,
                 ):
                     if json_output:
                         click.echo(json.dumps(event.model_dump(), default=str))

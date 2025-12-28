@@ -62,7 +62,6 @@ from kai_client.models import (
 )
 from kai_client.sse import SSEStreamParser, parse_sse_event, parse_sse_stream
 from kai_client.types import (
-    ChatModel,
     FinishReason,
     MessageRole,
     SSEEventType,
@@ -118,7 +117,6 @@ __all__ = [
     "parse_sse_stream",
     "parse_sse_event",
     # Enums
-    "ChatModel",
     "VisibilityType",
     "VoteType",
     "MessageRole",
