@@ -4,13 +4,6 @@ from enum import Enum
 from typing import Union
 
 
-class ChatModel(str, Enum):
-    """Available chat models."""
-
-    CHAT = "chat-model"
-    REASONING = "chat-model-reasoning"
-
-
 class VisibilityType(str, Enum):
     """Chat visibility types."""
 
