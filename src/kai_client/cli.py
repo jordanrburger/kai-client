@@ -227,6 +227,7 @@ async def send_and_display(
 ):
     """Send a message and display the response."""
     pending_approval = None
+    stream_finished = False
 
     async for event in client.send_message(chat_id, message):
         if json_output:
@@ -245,13 +246,14 @@ async def send_and_display(
                 elif event.state == "output-available":
                     click.echo(f"\n[{event.tool_name} completed]", nl=False)
             elif event.type == "finish":
+                stream_finished = True
                 if not json_output:
                     click.echo()  # Final newline
             elif event.type == "error":
                 click.echo(f"\n[Error: {event.message}]", err=True)
 
-    # Handle tool approval if needed
-    if pending_approval:
+    # Handle tool approval if needed (only if stream didn't already finish)
+    if pending_approval and not stream_finished:
         if auto_approve:
             click.echo("[Auto-approving...]")
             async for event in client.confirm_tool(
@@ -268,6 +270,7 @@ async def send_and_display(
                         click.echo(f"\n[{event.tool_name} completed]", nl=False)
                     elif event.type == "finish":
                         click.echo()
+                        break
         else:
             # Interactive approval
             if click.confirm("Approve this tool call?"):
@@ -285,6 +288,7 @@ async def send_and_display(
                             click.echo(f"\n[{event.tool_name} completed]", nl=False)
                         elif event.type == "finish":
                             click.echo()
+                            break
             else:
                 async for event in client.deny_tool(
                     chat_id=chat_id,
@@ -298,6 +302,7 @@ async def send_and_display(
                             click.echo(event.text, nl=False)
                         elif event.type == "finish":
                             click.echo()
+                            break
 
 
 @main.command()
