@@ -106,6 +106,105 @@ class TestParseSSEEvent:
         assert event.type == ""
 
 
+class TestProductionSSEFormats:
+    """Tests for production SSE event formats."""
+
+    def test_parse_text_delta_event(self):
+        """Test parsing production text-delta event."""
+        data = {"type": "text-delta", "delta": "Hello from production!"}
+        event = parse_sse_event(data)
+        assert isinstance(event, TextEvent)
+        assert event.type == "text"
+        assert event.text == "Hello from production!"
+
+    def test_parse_text_delta_with_state(self):
+        """Test parsing production text-delta event with state."""
+        data = {"type": "text-delta", "delta": "Done", "state": "done"}
+        event = parse_sse_event(data)
+        assert isinstance(event, TextEvent)
+        assert event.text == "Done"
+        assert event.state == "done"
+
+    def test_parse_start_step_event(self):
+        """Test parsing production start-step event (alternate name)."""
+        data = {"type": "start-step"}
+        event = parse_sse_event(data)
+        assert isinstance(event, StepStartEvent)
+        assert event.type == "step-start"
+
+    def test_parse_tool_input_start_event(self):
+        """Test parsing production tool-input-start event."""
+        data = {
+            "type": "tool-input-start",
+            "toolCallId": "call-123",
+            "toolName": "create_bucket",
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolCallEvent)
+        assert event.type == "tool-call"
+        assert event.tool_call_id == "call-123"
+        assert event.tool_name == "create_bucket"
+        assert event.state == "started"
+        assert event.input is None
+        assert event.output is None
+
+    def test_parse_tool_input_available_event(self):
+        """Test parsing production tool-input-available event."""
+        data = {
+            "type": "tool-input-available",
+            "toolCallId": "call-123",
+            "toolName": "create_bucket",
+            "input": {"name": "test-bucket", "stage": "in"},
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolCallEvent)
+        assert event.type == "tool-call"
+        assert event.tool_call_id == "call-123"
+        assert event.state == "input-available"
+        assert event.input == {"name": "test-bucket", "stage": "in"}
+        assert event.output is None
+
+    def test_parse_tool_output_available_event(self):
+        """Test parsing production tool-output-available event."""
+        data = {
+            "type": "tool-output-available",
+            "toolCallId": "call-123",
+            "toolName": "create_bucket",
+            "output": {"success": True, "bucket_id": "in.c-test"},
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolCallEvent)
+        assert event.type == "tool-call"
+        assert event.tool_call_id == "call-123"
+        assert event.state == "output-available"
+        assert event.output == {"success": True, "bucket_id": "in.c-test"}
+        assert event.input is None
+
+    def test_parse_finish_step_event(self):
+        """Test parsing production finish-step event."""
+        data = {"type": "finish-step", "finishReason": "stop"}
+        event = parse_sse_event(data)
+        assert isinstance(event, FinishEvent)
+        assert event.type == "finish"
+        assert event.finish_reason == "stop"
+
+    def test_parse_finish_event_default_reason(self):
+        """Test parsing finish event with missing finishReason."""
+        data = {"type": "finish"}
+        event = parse_sse_event(data)
+        assert isinstance(event, FinishEvent)
+        assert event.finish_reason == "stop"  # Default
+
+    def test_production_unknown_events_passthrough(self):
+        """Test that production-specific events we don't handle are returned as unknown."""
+        # These are intentionally not handled but shouldn't cause errors
+        for event_type in ["start", "text-start", "text-end", "step-end"]:
+            data = {"type": event_type, "id": "some-id"}
+            event = parse_sse_event(data)
+            assert isinstance(event, UnknownEvent)
+            assert event.type == event_type
+
+
 class TestSSEStreamParser:
     """Tests for SSEStreamParser class."""
 
