@@ -766,3 +766,473 @@ class TestToolApproval:
         assert request.headers["x-storageapi-url"] == "https://connection.test.keboola.com"
 
 
+class TestFromStorageApi:
+    """Tests for from_storage_api factory method."""
+
+    @pytest.mark.asyncio
+    async def test_from_storage_api_success(self, httpx_mock: HTTPXMock):
+        """Test successful URL discovery from Storage API."""
+        httpx_mock.add_response(
+            url="https://connection.keboola.com/v2/storage",
+            json={
+                "services": [
+                    {"id": "kai-assistant", "url": "https://kai.keboola.com"},
+                    {"id": "other-service", "url": "https://other.keboola.com"},
+                ]
+            },
+        )
+
+        client = await KaiClient.from_storage_api(
+            storage_api_token="test-token",
+            storage_api_url="https://connection.keboola.com",
+        )
+
+        assert client.base_url == "https://kai.keboola.com"
+        assert client.storage_api_token == "test-token"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_from_storage_api_service_not_found(self, httpx_mock: HTTPXMock):
+        """Test error when kai-assistant service is not in the list."""
+        httpx_mock.add_response(
+            url="https://connection.keboola.com/v2/storage",
+            json={
+                "services": [
+                    {"id": "other-service", "url": "https://other.keboola.com"},
+                ]
+            },
+        )
+
+        with pytest.raises(KaiError) as exc_info:
+            await KaiClient.from_storage_api(
+                storage_api_token="test-token",
+                storage_api_url="https://connection.keboola.com",
+            )
+
+        assert "kai-assistant service not found" in str(exc_info.value)
+        assert exc_info.value.code == "discovery:service_not_found"
+
+    @pytest.mark.asyncio
+    async def test_from_storage_api_no_url(self, httpx_mock: HTTPXMock):
+        """Test error when kai-assistant service has no URL."""
+        httpx_mock.add_response(
+            url="https://connection.keboola.com/v2/storage",
+            json={
+                "services": [
+                    {"id": "kai-assistant"},  # No URL
+                ]
+            },
+        )
+
+        with pytest.raises(KaiError) as exc_info:
+            await KaiClient.from_storage_api(
+                storage_api_token="test-token",
+                storage_api_url="https://connection.keboola.com",
+            )
+
+        assert "no URL" in str(exc_info.value)
+        assert exc_info.value.code == "discovery:no_url"
+
+    @pytest.mark.asyncio
+    async def test_from_storage_api_http_error(self, httpx_mock: HTTPXMock):
+        """Test error when Storage API returns HTTP error."""
+        httpx_mock.add_response(
+            url="https://connection.keboola.com/v2/storage",
+            status_code=401,
+            json={"message": "Unauthorized"},
+        )
+
+        with pytest.raises(KaiError) as exc_info:
+            await KaiClient.from_storage_api(
+                storage_api_token="bad-token",
+                storage_api_url="https://connection.keboola.com",
+            )
+
+        assert "HTTP 401" in str(exc_info.value)
+        assert exc_info.value.code == "discovery:http_error"
+
+    @pytest.mark.asyncio
+    async def test_from_storage_api_custom_timeouts(self, httpx_mock: HTTPXMock):
+        """Test that custom timeouts are passed to the client."""
+        httpx_mock.add_response(
+            url="https://connection.keboola.com/v2/storage",
+            json={
+                "services": [
+                    {"id": "kai-assistant", "url": "https://kai.keboola.com"},
+                ]
+            },
+        )
+
+        client = await KaiClient.from_storage_api(
+            storage_api_token="test-token",
+            storage_api_url="https://connection.keboola.com",
+            timeout=60.0,
+            stream_timeout=120.0,
+        )
+
+        assert client.timeout == 60.0
+        assert client.stream_timeout == 120.0
+        await client.close()
+
+
+class TestGetAllHistory:
+    """Tests for get_all_history pagination method."""
+
+    @pytest.mark.asyncio
+    async def test_get_all_history_single_page(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test iteration when all results fit in one page."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/history?limit=100",
+            json={
+                "chats": [
+                    {"id": "chat-1", "title": "Chat 1"},
+                    {"id": "chat-2", "title": "Chat 2"},
+                ],
+                "hasMore": False,
+            },
+        )
+
+        async with client:
+            chats = [chat async for chat in client.get_all_history()]
+
+        assert len(chats) == 2
+        assert chats[0].id == "chat-1"
+        assert chats[1].id == "chat-2"
+
+    @pytest.mark.asyncio
+    async def test_get_all_history_multiple_pages(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test pagination across multiple pages."""
+        # First page
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/history?limit=100",
+            json={
+                "chats": [
+                    {"id": "chat-1", "title": "Chat 1"},
+                    {"id": "chat-2", "title": "Chat 2"},
+                ],
+                "hasMore": True,
+            },
+        )
+        # Second page
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/history?limit=100&starting_after=chat-2",
+            json={
+                "chats": [
+                    {"id": "chat-3", "title": "Chat 3"},
+                ],
+                "hasMore": False,
+            },
+        )
+
+        async with client:
+            chats = [chat async for chat in client.get_all_history()]
+
+        assert len(chats) == 3
+        assert [c.id for c in chats] == ["chat-1", "chat-2", "chat-3"]
+
+    @pytest.mark.asyncio
+    async def test_get_all_history_empty(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test when there's no history."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/history?limit=100",
+            json={"chats": [], "hasMore": False},
+        )
+
+        async with client:
+            chats = [chat async for chat in client.get_all_history()]
+
+        assert len(chats) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_all_history_custom_batch_size(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test custom batch size."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/history?limit=50",
+            json={"chats": [], "hasMore": False},
+        )
+
+        async with client:
+            chats = [chat async for chat in client.get_all_history(batch_size=50)]
+
+        assert len(chats) == 0
+
+
+class TestResumeStream:
+    """Tests for resume_stream method."""
+
+    @pytest.mark.asyncio
+    async def test_resume_stream_success(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test resuming an active stream."""
+        sse_response = (
+            'data: {"type":"text","text":"Resumed content"}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat/chat-123/stream",
+            method="GET",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = [event async for event in client.resume_stream("chat-123")]
+
+        assert len(events) == 2
+        assert events[0].type == "text"
+        assert events[0].text == "Resumed content"
+
+    @pytest.mark.asyncio
+    async def test_resume_stream_no_stream_available(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test when no stream is available (204 response)."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat/chat-123/stream",
+            method="GET",
+            status_code=204,
+        )
+
+        async with client:
+            events = [event async for event in client.resume_stream("chat-123")]
+
+        assert len(events) == 0
+
+
+class TestConnectionErrors:
+    """Tests for connection error handling."""
+
+    @pytest.mark.asyncio
+    async def test_connection_error(self, httpx_mock: HTTPXMock):
+        """Test handling of connection errors."""
+        import httpx
+
+        from kai_client import KaiConnectionError
+
+        httpx_mock.add_exception(
+            httpx.ConnectError("Connection refused"),
+            url="http://localhost:3000/ping",
+        )
+
+        client = KaiClient(
+            storage_api_token="token",
+            storage_api_url="https://connection.keboola.com",
+        )
+
+        async with client:
+            with pytest.raises(KaiConnectionError) as exc_info:
+                await client.ping()
+
+        assert "Failed to connect" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_timeout_error(self, httpx_mock: HTTPXMock):
+        """Test handling of timeout errors."""
+        import httpx
+
+        from kai_client import KaiTimeoutError
+
+        httpx_mock.add_exception(
+            httpx.TimeoutException("Request timed out"),
+            url="http://localhost:3000/api/chat/chat-123",
+        )
+
+        client = KaiClient(
+            storage_api_token="token",
+            storage_api_url="https://connection.keboola.com",
+        )
+
+        async with client:
+            with pytest.raises(KaiTimeoutError) as exc_info:
+                await client.get_chat("chat-123")
+
+        assert "timed out" in str(exc_info.value)
+
+
+class TestVotingWithEnum:
+    """Tests for voting with VoteType enum."""
+
+    @pytest.mark.asyncio
+    async def test_vote_with_enum(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test voting using VoteType enum."""
+        from kai_client.types import VoteType
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/vote",
+            method="PATCH",
+            json={
+                "chatId": "chat-123",
+                "messageId": "msg-456",
+                "type": "up",
+            },
+        )
+
+        async with client:
+            vote = await client.vote("chat-123", "msg-456", VoteType.UP)
+
+        assert vote.type == "up"
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["type"] == "up"
+
+
+class TestSendMessageOptions:
+    """Tests for send_message with various options."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_visibility(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test send_message with visibility type enum."""
+        from kai_client.types import VisibilityType
+
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.send_message(
+                "chat-123",
+                "Test",
+                visibility=VisibilityType.PUBLIC,
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["selectedVisibilityType"] == "public"
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_branch_id(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test send_message with branch ID."""
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.send_message(
+                "chat-123",
+                "Test",
+                branch_id=12345,
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["branchId"] == 12345
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_metadata(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test send_message with hidden and request_path metadata."""
+        sse_response = 'data: {"type":"finish","finishReason":"stop"}\n'
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            async for _ in client.send_message(
+                "chat-123",
+                "Test",
+                hidden=True,
+                request_path="/some/path",
+            ):
+                pass
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["message"]["metadata"]["hidden"] is True
+        assert body["message"]["metadata"]["requestContext"]["path"] == "/some/path"
+
+
+class TestStreamErrorHandling:
+    """Tests for streaming error handling."""
+
+    @pytest.mark.asyncio
+    async def test_stream_http_error_with_json(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test error handling when stream endpoint returns JSON error."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            status_code=400,
+            json={
+                "code": "bad_request:api",
+                "message": "Invalid message format",
+            },
+        )
+
+        async with client:
+            with pytest.raises(KaiBadRequestError) as exc_info:
+                async for _ in client.send_message("chat-123", "Test"):
+                    pass
+
+        assert exc_info.value.code == "bad_request:api"
+
+    @pytest.mark.asyncio
+    async def test_stream_http_error_plain_text(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test error handling when stream endpoint returns plain text error."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            status_code=500,
+            content=b"Internal Server Error",
+        )
+
+        async with client:
+            with pytest.raises(KaiError) as exc_info:
+                async for _ in client.send_message("chat-123", "Test"):
+                    pass
+
+        assert "500" in str(exc_info.value)
+
+
+class TestGetVotesFormats:
+    """Tests for get_votes with different response formats."""
+
+    @pytest.mark.asyncio
+    async def test_get_votes_list_format(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test get_votes when API returns a list directly."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/vote?chatId=chat-123",
+            json=[
+                {"chatId": "chat-123", "messageId": "msg-1", "type": "up"},
+            ],
+        )
+
+        async with client:
+            votes = await client.get_votes("chat-123")
+
+        assert len(votes) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_votes_object_format(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test get_votes when API returns an object with votes field."""
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/vote?chatId=chat-123",
+            json={
+                "votes": [
+                    {"chatId": "chat-123", "messageId": "msg-1", "type": "up"},
+                ]
+            },
+        )
+
+        async with client:
+            votes = await client.get_votes("chat-123")
+
+        assert len(votes) == 1
+
+

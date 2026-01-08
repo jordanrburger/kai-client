@@ -349,3 +349,173 @@ class TestErrorResponse:
         assert response.cause == "Missing required field"
 
 
+class TestStepStartPart:
+    """Tests for StepStartPart model."""
+
+    def test_basic_creation(self):
+        from kai_client.models import StepStartPart
+
+        part = StepStartPart(type="step-start")
+        assert part.type == "step-start"
+
+    def test_serialization(self):
+        from kai_client.models import StepStartPart
+
+        part = StepStartPart(type="step-start")
+        data = part.model_dump()
+        assert data["type"] == "step-start"
+
+
+class TestMessage:
+    """Tests for Message model."""
+
+    def test_basic_creation(self):
+        from kai_client.models import Message
+
+        message = Message.model_validate({
+            "id": "msg-123",
+            "role": "user",
+            "parts": [{"type": "text", "text": "Hello"}],
+        })
+        assert message.id == "msg-123"
+        assert message.role == "user"
+        assert len(message.parts) == 1
+
+    def test_with_timestamps(self):
+        from kai_client.models import Message
+
+        message = Message.model_validate({
+            "id": "msg-123",
+            "role": "assistant",
+            "parts": [],
+            "createdAt": "2025-01-08T12:00:00Z",
+        })
+        assert message.created_at is not None
+        assert message.created_at.year == 2025
+
+    def test_with_metadata(self):
+        from kai_client.models import Message
+
+        message = Message.model_validate({
+            "id": "msg-123",
+            "role": "user",
+            "parts": [],
+            "metadata": {"hidden": True, "extra": "data"},
+        })
+        assert message.metadata is not None
+        assert message.metadata["hidden"] is True
+
+
+class TestMcpConnection:
+    """Tests for McpConnection model."""
+
+    def test_basic_creation(self):
+        from kai_client.models import McpConnection
+
+        mcp = McpConnection(name="keboola-mcp", status="connected")
+        assert mcp.name == "keboola-mcp"
+        assert mcp.status == "connected"
+
+    def test_extra_fields_allowed(self):
+        from kai_client.models import McpConnection
+
+        mcp = McpConnection.model_validate({
+            "name": "test-mcp",
+            "status": "disconnected",
+            "extra_field": "value",
+        })
+        assert mcp.name == "test-mcp"
+
+
+class TestUnknownEvent:
+    """Tests for UnknownEvent model."""
+
+    def test_basic_creation(self):
+        from kai_client.models import UnknownEvent
+
+        event = UnknownEvent(type="custom-event", data={"foo": "bar"})
+        assert event.type == "custom-event"
+        assert event.data == {"foo": "bar"}
+
+    def test_default_data(self):
+        from kai_client.models import UnknownEvent
+
+        event = UnknownEvent(type="minimal")
+        assert event.data == {}
+
+
+class TestRequestContext:
+    """Tests for RequestContext model."""
+
+    def test_basic_creation(self):
+        ctx = RequestContext(path="/some/path")
+        assert ctx.path == "/some/path"
+
+    def test_none_path(self):
+        ctx = RequestContext()
+        assert ctx.path is None
+
+
+class TestMessageMetadataFields:
+    """Tests for MessageMetadata serialization."""
+
+    def test_serialization_with_alias(self):
+        metadata = MessageMetadata(
+            hidden=True,
+            request_context=RequestContext(path="/test"),
+        )
+        data = metadata.model_dump(by_alias=True)
+        assert data["hidden"] is True
+        assert data["requestContext"]["path"] == "/test"
+
+
+class TestChatOptionalFields:
+    """Tests for optional fields in Chat model."""
+
+    def test_chat_all_fields(self):
+        chat = Chat.model_validate({
+            "id": "chat-123",
+            "title": "My Chat",
+            "createdAt": "2025-01-08T10:00:00Z",
+            "updatedAt": "2025-01-08T11:00:00Z",
+            "visibility": "private",
+            "userId": "user-456",
+        })
+        assert chat.id == "chat-123"
+        assert chat.title == "My Chat"
+        assert chat.created_at is not None
+        assert chat.updated_at is not None
+        assert chat.visibility == "private"
+        assert chat.user_id == "user-456"
+
+    def test_chat_minimal_fields(self):
+        chat = Chat.model_validate({"id": "chat-123"})
+        assert chat.id == "chat-123"
+        assert chat.title is None
+        assert chat.created_at is None
+
+
+class TestVoteOptionalFields:
+    """Tests for optional fields in Vote model."""
+
+    def test_vote_all_fields(self):
+        vote = Vote.model_validate({
+            "id": "vote-123",
+            "chatId": "chat-456",
+            "messageId": "msg-789",
+            "type": "up",
+            "createdAt": "2025-01-08T12:00:00Z",
+        })
+        assert vote.id == "vote-123"
+        assert vote.created_at is not None
+
+    def test_vote_minimal_fields(self):
+        vote = Vote.model_validate({
+            "chatId": "chat-456",
+            "messageId": "msg-789",
+            "type": "down",
+        })
+        assert vote.id is None
+        assert vote.created_at is None
+
+
