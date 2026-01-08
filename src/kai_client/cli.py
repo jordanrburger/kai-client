@@ -227,7 +227,8 @@ async def send_and_display(
 ):
     """Send a message and display the response."""
     pending_approval = None
-    stream_finished = False
+    # Track current tool call to handle null tool_name in output-available events
+    current_tool_name: dict[str, str] = {}  # tool_call_id -> tool_name
 
     async for event in client.send_message(chat_id, message):
         if json_output:
@@ -238,28 +239,44 @@ async def send_and_display(
             elif event.type == "step-start":
                 click.echo("\n[Processing...]", nl=False)
             elif event.type == "tool-call":
+                # Track tool names by tool_call_id
+                if event.tool_call_id and event.tool_name:
+                    current_tool_name[event.tool_call_id] = event.tool_name
+                # Get the tool name, falling back to tracked name if null
+                tool_name = event.tool_name or current_tool_name.get(
+                    event.tool_call_id or "", "unknown"
+                )
+
                 if event.state == "started":
-                    click.echo(f"\n[Calling {event.tool_name}...]", nl=False)
+                    click.echo(f"\n[Calling {tool_name}...]", nl=False)
                 elif event.state == "input-available":
-                    click.echo(f"\n[Tool {event.tool_name} requires approval]")
+                    click.echo(f"\n[Tool {tool_name} requires approval]")
                     pending_approval = event
                 elif event.state == "output-available":
-                    click.echo(f"\n[{event.tool_name} completed]", nl=False)
+                    click.echo(f"\n[{tool_name} completed]", nl=False)
+                    # Tool completed, clear pending approval if this was the pending tool
+                    if pending_approval and pending_approval.tool_call_id == event.tool_call_id:
+                        pending_approval = None
             elif event.type == "finish":
-                stream_finished = True
                 if not json_output:
                     click.echo()  # Final newline
             elif event.type == "error":
                 click.echo(f"\n[Error: {event.message}]", err=True)
 
-    # Handle tool approval if needed (only if stream didn't already finish)
-    if pending_approval and not stream_finished:
+    # Handle tool approval if needed (pending_approval is set when a tool needs approval
+    # and cleared when that tool completes)
+    if pending_approval:
+        # Get the tool name from tracking dict or pending_approval
+        approved_tool_name = (
+            pending_approval.tool_name
+            or current_tool_name.get(pending_approval.tool_call_id or "", "unknown")
+        )
         if auto_approve:
             click.echo("[Auto-approving...]")
             async for event in client.confirm_tool(
                 chat_id=chat_id,
                 tool_call_id=pending_approval.tool_call_id,
-                tool_name=pending_approval.tool_name or "unknown",
+                tool_name=approved_tool_name,
             ):
                 if json_output:
                     click.echo(json.dumps(event.model_dump(), default=str))
@@ -267,7 +284,8 @@ async def send_and_display(
                     if event.type == "text":
                         click.echo(event.text, nl=False)
                     elif event.type == "tool-call" and event.state == "output-available":
-                        click.echo(f"\n[{event.tool_name} completed]", nl=False)
+                        tool_name = event.tool_name or approved_tool_name
+                        click.echo(f"\n[{tool_name} completed]", nl=False)
                     elif event.type == "finish":
                         click.echo()
                         break
@@ -277,7 +295,7 @@ async def send_and_display(
                 async for event in client.confirm_tool(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
-                    tool_name=pending_approval.tool_name or "unknown",
+                    tool_name=approved_tool_name,
                 ):
                     if json_output:
                         click.echo(json.dumps(event.model_dump(), default=str))
@@ -285,7 +303,8 @@ async def send_and_display(
                         if event.type == "text":
                             click.echo(event.text, nl=False)
                         elif event.type == "tool-call" and event.state == "output-available":
-                            click.echo(f"\n[{event.tool_name} completed]", nl=False)
+                            tool_name = event.tool_name or approved_tool_name
+                            click.echo(f"\n[{tool_name} completed]", nl=False)
                         elif event.type == "finish":
                             click.echo()
                             break
@@ -293,7 +312,7 @@ async def send_and_display(
                 async for event in client.deny_tool(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
-                    tool_name=pending_approval.tool_name or "unknown",
+                    tool_name=approved_tool_name,
                 ):
                     if json_output:
                         click.echo(json.dumps(event.model_dump(), default=str))

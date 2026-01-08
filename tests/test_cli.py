@@ -65,7 +65,7 @@ class TestMainGroup:
     def test_version(self, runner):
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.4.0" in result.output
+        assert "0.5.0" in result.output
 
     def test_help(self, runner):
         result = runner.invoke(main, ["--help"])
@@ -297,6 +297,192 @@ class TestChatCommand:
 
             # Error should be displayed
             assert "Something went wrong" in result.output
+
+    def test_chat_tool_name_tracked_when_null_in_output(self, runner, mock_env):
+        """Test that tool_name is properly tracked when server returns null in output-available.
+
+        This tests the fix for the bug where [None completed] was displayed because
+        the server returns tool_name=null in output-available events.
+        """
+        with patch("kai_client.cli.get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.new_chat_id = MagicMock(return_value="test-chat-id")
+
+            async def mock_send_message(chat_id, message):
+                # Tool call started with tool_name
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-123",
+                    toolName="get_buckets",
+                    state="started",
+                )
+                # Input available with tool_name
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-123",
+                    toolName="get_buckets",
+                    state="input-available",
+                    input={"bucket_ids": []},
+                )
+                # Output available with NULL tool_name (server bug)
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-123",
+                    toolName=None,  # Server returns null here
+                    state="output-available",
+                    output={"content": "buckets data"},
+                )
+                yield TextEvent(type="text", text="Here are your buckets")
+                yield FinishEvent(type="finish", finishReason="stop")
+
+            mock_client.send_message = mock_send_message
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_get_client.return_value = mock_client
+
+            result = runner.invoke(main, ["chat", "-m", "List buckets"])
+
+            assert result.exit_code == 0
+            # Should show the tracked tool name, not "None"
+            assert "[get_buckets completed]" in result.output
+            assert "[None completed]" not in result.output
+
+    def test_chat_auto_approve_after_finish_event(self, runner, mock_env):
+        """Test that auto-approve works even when finish events occur between tool calls.
+
+        This tests the fix for the bug where auto-approve didn't trigger because
+        stream_finished was set to True by a finish event from a previous step,
+        before the write tool that needs approval.
+        """
+        with patch("kai_client.cli.get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.new_chat_id = MagicMock(return_value="test-chat-id")
+
+            from kai_client.models import StepStartEvent
+
+            async def mock_send_message(chat_id, message):
+                # First step: read-only tool that auto-completes
+                yield StepStartEvent(type="step-start")
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-read",
+                    toolName="get_components",
+                    state="started",
+                )
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-read",
+                    toolName="get_components",
+                    state="input-available",
+                    input={},
+                )
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-read",
+                    toolName="get_components",
+                    state="output-available",
+                    output={"components": []},
+                )
+                yield TextEvent(type="text", text="Got components. ")
+                # Finish event after first step (this was causing the bug)
+                yield FinishEvent(type="finish", finishReason="stop")
+
+                # Second step: write tool that needs approval
+                yield StepStartEvent(type="step-start")
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-write",
+                    toolName="create_config",
+                    state="started",
+                )
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-write",
+                    toolName="create_config",
+                    state="input-available",
+                    input={"name": "test-config"},
+                )
+                # Stream ends here waiting for approval (no output-available yet)
+                yield FinishEvent(type="finish", finishReason="stop")
+
+            async def mock_confirm_tool(chat_id, tool_call_id, tool_name):
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-write",
+                    toolName="create_config",
+                    state="output-available",
+                    output={"id": "config-123"},
+                )
+                yield TextEvent(type="text", text="Configuration created!")
+                yield FinishEvent(type="finish", finishReason="stop")
+
+            mock_client.send_message = mock_send_message
+            mock_client.confirm_tool = mock_confirm_tool
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_get_client.return_value = mock_client
+
+            result = runner.invoke(
+                main, ["chat", "--auto-approve", "-m", "Create config"]
+            )
+
+            assert result.exit_code == 0
+            # Auto-approve should have been triggered despite the earlier finish event
+            assert "[Auto-approving...]" in result.output
+            assert "Configuration created!" in result.output
+
+    def test_chat_pending_approval_cleared_on_tool_completion(self, runner, mock_env):
+        """Test that pending_approval is cleared when the tool completes.
+
+        This ensures that if a tool shows 'requires approval' but then completes
+        (server auto-approved it), we don't try to approve it again.
+        """
+        with patch("kai_client.cli.get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.new_chat_id = MagicMock(return_value="test-chat-id")
+
+            async def mock_send_message(chat_id, message):
+                # Tool shows input-available (would normally need approval)
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-123",
+                    toolName="get_buckets",
+                    state="started",
+                )
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-123",
+                    toolName="get_buckets",
+                    state="input-available",
+                    input={},
+                )
+                # But server auto-approves it (sends output-available)
+                yield ToolCallEvent(
+                    type="tool-call",
+                    toolCallId="tool-123",
+                    toolName="get_buckets",
+                    state="output-available",
+                    output={"buckets": []},
+                )
+                yield TextEvent(type="text", text="Done")
+                yield FinishEvent(type="finish", finishReason="stop")
+
+            mock_client.send_message = mock_send_message
+            # confirm_tool should NOT be called since tool completed
+            mock_client.confirm_tool = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_get_client.return_value = mock_client
+
+            result = runner.invoke(
+                main, ["chat", "--auto-approve", "-m", "List buckets"]
+            )
+
+            assert result.exit_code == 0
+            # Should NOT show auto-approving since tool already completed
+            assert "[Auto-approving...]" not in result.output
+            # confirm_tool should not have been called
+            mock_client.confirm_tool.assert_not_called()
 
 
 class TestHistoryCommand:
