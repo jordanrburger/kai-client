@@ -218,6 +218,26 @@ def chat(
     run_async(_chat())
 
 
+async def display_tool_result_events(
+    events_generator,
+    json_output: bool,
+    approved_tool_name: str,
+):
+    """Display events from a tool result response."""
+    async for event in events_generator:
+        if json_output:
+            click.echo(json.dumps(event.model_dump(), default=str))
+        else:
+            if event.type == "text":
+                click.echo(event.text, nl=False)
+            elif event.type == "tool-call" and event.state == "output-available":
+                tool_name = event.tool_name or approved_tool_name
+                click.echo(f"\n[{tool_name} completed]", nl=False)
+            elif event.type == "finish":
+                click.echo()
+                break
+
+
 async def send_and_display(
     client: KaiClient,
     chat_id: str,
@@ -273,55 +293,35 @@ async def send_and_display(
         )
         if auto_approve:
             click.echo("[Auto-approving...]")
-            async for event in client.confirm_tool(
-                chat_id=chat_id,
-                tool_call_id=pending_approval.tool_call_id,
-                tool_name=approved_tool_name,
-            ):
-                if json_output:
-                    click.echo(json.dumps(event.model_dump(), default=str))
-                else:
-                    if event.type == "text":
-                        click.echo(event.text, nl=False)
-                    elif event.type == "tool-call" and event.state == "output-available":
-                        tool_name = event.tool_name or approved_tool_name
-                        click.echo(f"\n[{tool_name} completed]", nl=False)
-                    elif event.type == "finish":
-                        click.echo()
-                        break
+            await display_tool_result_events(
+                client.confirm_tool(
+                    chat_id=chat_id,
+                    tool_call_id=pending_approval.tool_call_id,
+                    tool_name=approved_tool_name,
+                ),
+                json_output,
+                approved_tool_name,
+            )
+        elif click.confirm("Approve this tool call?"):
+            await display_tool_result_events(
+                client.confirm_tool(
+                    chat_id=chat_id,
+                    tool_call_id=pending_approval.tool_call_id,
+                    tool_name=approved_tool_name,
+                ),
+                json_output,
+                approved_tool_name,
+            )
         else:
-            # Interactive approval
-            if click.confirm("Approve this tool call?"):
-                async for event in client.confirm_tool(
+            await display_tool_result_events(
+                client.deny_tool(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
                     tool_name=approved_tool_name,
-                ):
-                    if json_output:
-                        click.echo(json.dumps(event.model_dump(), default=str))
-                    else:
-                        if event.type == "text":
-                            click.echo(event.text, nl=False)
-                        elif event.type == "tool-call" and event.state == "output-available":
-                            tool_name = event.tool_name or approved_tool_name
-                            click.echo(f"\n[{tool_name} completed]", nl=False)
-                        elif event.type == "finish":
-                            click.echo()
-                            break
-            else:
-                async for event in client.deny_tool(
-                    chat_id=chat_id,
-                    tool_call_id=pending_approval.tool_call_id,
-                    tool_name=approved_tool_name,
-                ):
-                    if json_output:
-                        click.echo(json.dumps(event.model_dump(), default=str))
-                    else:
-                        if event.type == "text":
-                            click.echo(event.text, nl=False)
-                        elif event.type == "finish":
-                            click.echo()
-                            break
+                ),
+                json_output,
+                approved_tool_name,
+            )
 
 
 @main.command()

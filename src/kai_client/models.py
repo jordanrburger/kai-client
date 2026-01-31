@@ -177,17 +177,9 @@ class Chat(BaseModel):
     user_id: Optional[str] = Field(default=None, alias="userId")
 
 
-class ChatDetail(BaseModel):
+class ChatDetail(Chat):
     """Detailed chat information including messages."""
 
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
-
-    id: str
-    title: Optional[str] = None
-    created_at: Optional[datetime] = Field(default=None, alias="createdAt")
-    updated_at: Optional[datetime] = Field(default=None, alias="updatedAt")
-    visibility: Optional[str] = None
-    user_id: Optional[str] = Field(default=None, alias="userId")
     messages: list[Message] = Field(default_factory=list)
 
 
