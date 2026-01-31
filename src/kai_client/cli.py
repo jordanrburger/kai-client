@@ -4,12 +4,19 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 import click
+from dotenv import load_dotenv
 
-from kai_client import KaiClient, __version__
-from kai_client.types import VoteType
+# Load .env.local file if it exists (before any commands run)
+_env_local = Path.cwd() / ".env.local"
+if _env_local.exists():
+    load_dotenv(_env_local)
+
+from kai_client import KaiClient, __version__  # noqa: E402
+from kai_client.types import VoteType  # noqa: E402
 
 
 def get_env_or_error(name: str) -> str:
