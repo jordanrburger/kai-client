@@ -1,7 +1,6 @@
 """Type aliases and enums for the Kai client library."""
 
 from enum import Enum
-from typing import Union
 
 
 class VisibilityType(str, Enum):
@@ -67,12 +66,4 @@ class ToolCallState(str, Enum):
 ChatId = str
 MessageId = str
 ToolCallId = str
-
-# Union types for discriminated unions
-PartType = Union["TextPart", "ToolResultPart", "ToolCallPart", "StepStartPart"]
-
-# Forward references for circular imports
-if False:  # TYPE_CHECKING alternative that works at runtime
-    from kai_client.models import StepStartPart, TextPart, ToolCallPart, ToolResultPart
-
 

@@ -1,7 +1,7 @@
 """Server-Sent Events (SSE) stream parser for the Kai client."""
 
 import json
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 
@@ -15,6 +15,118 @@ from kai_client.models import (
     ToolCallEvent,
     UnknownEvent,
 )
+
+
+# =============================================================================
+# Individual Event Parsers
+# =============================================================================
+
+
+def _parse_text_event(data: dict[str, Any]) -> TextEvent:
+    """Parse a text event (local format)."""
+    return TextEvent(
+        type="text",
+        text=data.get("text", ""),
+        state=data.get("state"),
+    )
+
+
+def _parse_text_delta_event(data: dict[str, Any]) -> TextEvent:
+    """Parse a text-delta event (production format)."""
+    return TextEvent(
+        type="text",
+        text=data.get("delta", ""),
+        state=data.get("state"),
+    )
+
+
+def _parse_step_start_event(data: dict[str, Any]) -> StepStartEvent:
+    """Parse a step-start or start-step event."""
+    return StepStartEvent(type="step-start")
+
+
+def _parse_tool_call_event(data: dict[str, Any]) -> ToolCallEvent:
+    """Parse a tool-call event (local format)."""
+    return ToolCallEvent(
+        type="tool-call",
+        toolCallId=data.get("toolCallId", ""),
+        toolName=data.get("toolName"),
+        state=data.get("state", ""),
+        input=data.get("input"),
+        output=data.get("output"),
+    )
+
+
+def _parse_tool_input_start_event(data: dict[str, Any]) -> ToolCallEvent:
+    """Parse a tool-input-start event (production format: tool call begins)."""
+    return ToolCallEvent(
+        type="tool-call",
+        toolCallId=data.get("toolCallId", ""),
+        toolName=data.get("toolName"),
+        state="started",
+        input=None,
+        output=None,
+    )
+
+
+def _parse_tool_input_available_event(data: dict[str, Any]) -> ToolCallEvent:
+    """Parse a tool-input-available event (production format: full input ready)."""
+    return ToolCallEvent(
+        type="tool-call",
+        toolCallId=data.get("toolCallId", ""),
+        toolName=data.get("toolName"),
+        state="input-available",
+        input=data.get("input"),
+        output=None,
+    )
+
+
+def _parse_tool_output_available_event(data: dict[str, Any]) -> ToolCallEvent:
+    """Parse a tool-output-available event (production format: tool completed)."""
+    return ToolCallEvent(
+        type="tool-call",
+        toolCallId=data.get("toolCallId", ""),
+        toolName=data.get("toolName"),
+        state="output-available",
+        input=None,
+        output=data.get("output"),
+    )
+
+
+def _parse_finish_event(data: dict[str, Any]) -> FinishEvent:
+    """Parse a finish or finish-step event."""
+    return FinishEvent(
+        type="finish",
+        finishReason=data.get("finishReason", "stop"),
+    )
+
+
+def _parse_error_event(data: dict[str, Any]) -> ErrorEvent:
+    """Parse an error event."""
+    return ErrorEvent(
+        type="error",
+        message=data.get("message", "Unknown error"),
+        code=data.get("code"),
+    )
+
+
+# =============================================================================
+# Event Parser Dispatch Table
+# =============================================================================
+
+EVENT_PARSERS: dict[str, Callable[[dict[str, Any]], SSEEvent]] = {
+    "text": _parse_text_event,
+    "text-delta": _parse_text_delta_event,
+    "step-start": _parse_step_start_event,
+    "start-step": _parse_step_start_event,
+    "tool-call": _parse_tool_call_event,
+    "tool-input-start": _parse_tool_input_start_event,
+    "tool-input-available": _parse_tool_input_available_event,
+    "tool-output-available": _parse_tool_output_available_event,
+    "finish": _parse_finish_event,
+    "finish-step": _parse_finish_event,
+    "error": _parse_error_event,
+}
 
 
 def parse_sse_event(data: dict[str, Any]) -> SSEEvent:
@@ -32,92 +144,17 @@ def parse_sse_event(data: dict[str, Any]) -> SSEEvent:
         A typed SSE event model.
     """
     event_type = data.get("type", "")
+    parser = EVENT_PARSERS.get(event_type)
 
-    # Text events - handle both local ("text") and production ("text-delta") formats
-    if event_type == "text":
-        return TextEvent(
-            type="text",
-            text=data.get("text", ""),
-            state=data.get("state"),
-        )
+    if parser:
+        return parser(data)
 
-    if event_type == "text-delta":
-        # Production format: uses "delta" instead of "text"
-        return TextEvent(
-            type="text",
-            text=data.get("delta", ""),
-            state=data.get("state"),
-        )
-
-    # Step start - handle both "step-start" (local) and "start-step" (production)
-    if event_type in ("step-start", "start-step"):
-        return StepStartEvent(type="step-start")
-
-    # Tool call events - handle both local and production formats
-    if event_type == "tool-call":
-        return ToolCallEvent(
-            type="tool-call",
-            toolCallId=data.get("toolCallId", ""),
-            toolName=data.get("toolName"),
-            state=data.get("state", ""),
-            input=data.get("input"),
-            output=data.get("output"),
-        )
-
-    # Production format: tool-input-start (tool call begins)
-    if event_type == "tool-input-start":
-        return ToolCallEvent(
-            type="tool-call",
-            toolCallId=data.get("toolCallId", ""),
-            toolName=data.get("toolName"),
-            state="started",
-            input=None,
-            output=None,
-        )
-
-    # Production format: tool-input-available (full input ready)
-    if event_type == "tool-input-available":
-        return ToolCallEvent(
-            type="tool-call",
-            toolCallId=data.get("toolCallId", ""),
-            toolName=data.get("toolName"),
-            state="input-available",
-            input=data.get("input"),
-            output=None,
-        )
-
-    # Production format: tool-output-available (tool completed)
-    if event_type == "tool-output-available":
-        return ToolCallEvent(
-            type="tool-call",
-            toolCallId=data.get("toolCallId", ""),
-            toolName=data.get("toolName"),
-            state="output-available",
-            input=None,
-            output=data.get("output"),
-        )
-
-    # Finish events - handle both "finish" and "finish-step"
-    if event_type in ("finish", "finish-step"):
-        return FinishEvent(
-            type="finish",
-            finishReason=data.get("finishReason", "stop"),
-        )
-
-    if event_type == "error":
-        return ErrorEvent(
-            type="error",
-            message=data.get("message", "Unknown error"),
-            code=data.get("code"),
-        )
-
-    # Production-specific events that we can safely ignore or return as unknown
+    # Unknown event type - return with raw data
+    # Production-specific events that we can safely ignore:
     # - "start": message start (contains messageId)
     # - "text-start": text block start (contains id)
     # - "text-end": text block end
     # - "step-end": step end
-
-    # Unknown event type - return with raw data
     return UnknownEvent(type=event_type, data=data)
 
 

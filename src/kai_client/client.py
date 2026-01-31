@@ -1,6 +1,7 @@
 """Main Kai client implementation."""
 
 import uuid
+from json import JSONDecodeError
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any, AsyncIterator, Optional
@@ -31,6 +32,13 @@ from kai_client.models import (
 )
 from kai_client.sse import parse_sse_stream
 from kai_client.types import VisibilityType, VoteType
+
+
+def _normalize_visibility(visibility: str | VisibilityType) -> str:
+    """Convert visibility to string value."""
+    if isinstance(visibility, VisibilityType):
+        return visibility.value
+    return visibility
 
 
 class KaiClient:
@@ -254,9 +262,7 @@ class KaiClient:
                 try:
                     error_data = response.json()
                     raise_for_error_response(error_data)
-                except KaiError:
-                    raise
-                except Exception:
+                except JSONDecodeError:
                     raise KaiError(
                         message=f"HTTP {response.status_code}: {response.text}",
                         code=f"http:{response.status_code}",
@@ -431,9 +437,7 @@ class KaiClient:
                 metadata=metadata,
             ),
             selected_chat_model="chat-model",
-            selected_visibility_type=str(
-                visibility.value if isinstance(visibility, VisibilityType) else visibility
-            ),
+            selected_visibility_type=_normalize_visibility(visibility),
             branch_id=branch_id,
         )
 
@@ -506,9 +510,7 @@ class KaiClient:
                 ],
             ),
             selected_chat_model="chat-model",
-            selected_visibility_type=str(
-                visibility.value if isinstance(visibility, VisibilityType) else visibility
-            ),
+            selected_visibility_type=_normalize_visibility(visibility),
             branch_id=branch_id,
         )
 

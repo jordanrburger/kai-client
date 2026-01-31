@@ -34,49 +34,33 @@ class KaiError(Exception):
 class KaiAuthenticationError(KaiError):
     """Raised when authentication fails (unauthorized:chat)."""
 
-    pass
-
 
 class KaiForbiddenError(KaiError):
     """Raised when access is forbidden (forbidden:chat)."""
-
-    pass
 
 
 class KaiNotFoundError(KaiError):
     """Raised when a resource is not found (not_found:chat)."""
 
-    pass
-
 
 class KaiRateLimitError(KaiError):
     """Raised when rate limit is exceeded (rate_limit:chat)."""
-
-    pass
 
 
 class KaiBadRequestError(KaiError):
     """Raised when the request is malformed (bad_request:api)."""
 
-    pass
-
 
 class KaiStreamError(KaiError):
     """Raised when there's an error during SSE streaming."""
-
-    pass
 
 
 class KaiConnectionError(KaiError):
     """Raised when connection to the server fails."""
 
-    pass
-
 
 class KaiTimeoutError(KaiError):
     """Raised when a request times out."""
-
-    pass
 
 
 # Mapping of API error codes to exception classes
