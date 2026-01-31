@@ -1,8 +1,8 @@
 """Main Kai client implementation."""
 
 import uuid
-from json import JSONDecodeError
 from contextlib import asynccontextmanager
+from json import JSONDecodeError
 from types import TracebackType
 from typing import Any, AsyncIterator, Optional
 
