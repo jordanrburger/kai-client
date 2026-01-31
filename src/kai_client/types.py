@@ -40,6 +40,7 @@ class SSEEventType(str, Enum):
     STEP_START = "step-start"
     TOOL_CALL = "tool-call"
     TOOL_RESULT = "tool-result"
+    TOOL_OUTPUT_ERROR = "tool-output-error"
     FINISH = "finish"
     ERROR = "error"
 
@@ -56,8 +57,10 @@ class FinishReason(str, Enum):
 class ToolCallState(str, Enum):
     """State of a tool call."""
 
+    STARTED = "started"
     INPUT_AVAILABLE = "input-available"
     OUTPUT_AVAILABLE = "output-available"
+    OUTPUT_ERROR = "output-error"
     STREAMING = "streaming"
     DONE = "done"
 

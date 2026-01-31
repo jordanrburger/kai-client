@@ -13,6 +13,7 @@ from kai_client.models import (
     StepStartEvent,
     TextEvent,
     ToolCallEvent,
+    ToolOutputErrorEvent,
     UnknownEvent,
 )
 
@@ -109,6 +110,15 @@ def _parse_error_event(data: dict[str, Any]) -> ErrorEvent:
     )
 
 
+def _parse_tool_output_error_event(data: dict[str, Any]) -> ToolOutputErrorEvent:
+    """Parse a tool-output-error event (production format: tool execution failed)."""
+    return ToolOutputErrorEvent(
+        type="tool-output-error",
+        toolCallId=data.get("toolCallId", ""),
+        errorText=data.get("errorText", "Unknown error"),
+    )
+
+
 # =============================================================================
 # Event Parser Dispatch Table
 # =============================================================================
@@ -122,6 +132,7 @@ EVENT_PARSERS: dict[str, Callable[[dict[str, Any]], SSEEvent]] = {
     "tool-input-start": _parse_tool_input_start_event,
     "tool-input-available": _parse_tool_input_available_event,
     "tool-output-available": _parse_tool_output_available_event,
+    "tool-output-error": _parse_tool_output_error_event,
     "finish": _parse_finish_event,
     "finish-step": _parse_finish_event,
     "error": _parse_error_event,

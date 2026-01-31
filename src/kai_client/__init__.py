@@ -55,6 +55,7 @@ from kai_client.models import (
     TextPart,
     ToolCallEvent,
     ToolCallPart,
+    ToolOutputErrorEvent,
     ToolResultPart,
     UnknownEvent,
     Vote,
@@ -70,7 +71,7 @@ from kai_client.types import (
     VoteType,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.8.0"
 
 __all__ = [
     # Main client
@@ -109,6 +110,7 @@ __all__ = [
     "TextEvent",
     "StepStartEvent",
     "ToolCallEvent",
+    "ToolOutputErrorEvent",
     "FinishEvent",
     "ErrorEvent",
     "UnknownEvent",

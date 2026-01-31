@@ -271,6 +271,19 @@ class ErrorEvent(BaseSSEEvent):
     code: Optional[str] = None
 
 
+class ToolOutputErrorEvent(BaseSSEEvent):
+    """Tool output error event from the stream.
+
+    Emitted when a tool execution fails after user confirmation.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    type: Literal["tool-output-error"] = "tool-output-error"
+    tool_call_id: str = Field(alias="toolCallId")
+    error_text: str = Field(alias="errorText")
+
+
 class UnknownEvent(BaseSSEEvent):
     """Unknown event type - stores raw data."""
 
@@ -285,6 +298,7 @@ SSEEvent = Union[
     ToolCallEvent,
     FinishEvent,
     ErrorEvent,
+    ToolOutputErrorEvent,
     UnknownEvent,
 ]
 
