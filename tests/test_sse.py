@@ -7,6 +7,7 @@ from kai_client.models import (
     StepStartEvent,
     TextEvent,
     ToolCallEvent,
+    ToolOutputErrorEvent,
     UnknownEvent,
 )
 from kai_client.sse import SSEStreamParser, parse_sse_event
@@ -203,6 +204,176 @@ class TestProductionSSEFormats:
             event = parse_sse_event(data)
             assert isinstance(event, UnknownEvent)
             assert event.type == event_type
+
+    def test_parse_tool_output_error_event(self):
+        """Test parsing production tool-output-error event."""
+        data = {
+            "type": "tool-output-error",
+            "toolCallId": "call-123",
+            "errorText": "Tool execution failed: Connection timeout",
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolOutputErrorEvent)
+        assert event.type == "tool-output-error"
+        assert event.tool_call_id == "call-123"
+        assert event.error_text == "Tool execution failed: Connection timeout"
+
+    def test_parse_tool_output_error_event_minimal(self):
+        """Test parsing tool-output-error event with minimal data."""
+        data = {
+            "type": "tool-output-error",
+            "toolCallId": "call-456",
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolOutputErrorEvent)
+        assert event.tool_call_id == "call-456"
+        assert event.error_text == "Unknown error"  # Default value
+
+
+class TestToolCallStates:
+    """Tests for all tool call state transitions."""
+
+    def test_tool_call_started_state(self):
+        """Test tool call in started state."""
+        data = {
+            "type": "tool-input-start",
+            "toolCallId": "call-001",
+            "toolName": "create_config",
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolCallEvent)
+        assert event.state == "started"
+        assert event.tool_name == "create_config"
+        assert event.input is None
+        assert event.output is None
+
+    def test_tool_call_input_available_state(self):
+        """Test tool call in input-available state (waiting for approval)."""
+        data = {
+            "type": "tool-input-available",
+            "toolCallId": "call-002",
+            "toolName": "update_config",
+            "input": {
+                "configurationId": "123",
+                "configuration": {"foo": "bar"},
+                "justification": "Updating config based on user request",
+            },
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolCallEvent)
+        assert event.state == "input-available"
+        assert event.tool_name == "update_config"
+        assert event.input["configurationId"] == "123"
+
+    def test_tool_call_output_available_state(self):
+        """Test tool call in output-available state (completed)."""
+        data = {
+            "type": "tool-output-available",
+            "toolCallId": "call-003",
+            "toolName": "get_tables",
+            "output": {
+                "tables": ["table1", "table2"],
+                "_toolName": "get_tables",
+                "_timestamp": "2025-01-15T10:00:00Z",
+            },
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolCallEvent)
+        assert event.state == "output-available"
+        assert event.output["tables"] == ["table1", "table2"]
+
+    def test_tool_call_output_error_state(self):
+        """Test tool call that resulted in error."""
+        data = {
+            "type": "tool-output-error",
+            "toolCallId": "call-004",
+            "errorText": "No execute function found for tool",
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, ToolOutputErrorEvent)
+        assert event.tool_call_id == "call-004"
+        assert "No execute function found" in event.error_text
+
+
+class TestAllToolTypes:
+    """Tests to verify all backend tool types can be handled."""
+
+    # All 28 MCP tools + 3 local tools from the backend
+    TOOL_NAMES = [
+        # Component Tools
+        "add_config_row",
+        "create_config",
+        "create_sql_transformation",
+        "get_components",
+        "get_config_examples",
+        "get_configs",
+        "update_config",
+        "update_config_row",
+        "update_sql_transformation",
+        # Documentation Tools
+        "docs_query",
+        # Flow Tools
+        "create_conditional_flow",
+        "create_flow",
+        "get_flow_examples",
+        "get_flow_schema",
+        "get_flows",
+        "update_flow",
+        # Jobs Tools
+        "get_jobs",
+        "run_job",
+        # OAuth Tools
+        "create_oauth_url",
+        # Data Apps Tools
+        "deploy_data_app",
+        "get_data_apps",
+        "modify_data_app",
+        # Project Tools
+        "get_project_info",
+        # SQL Tools
+        "query_data",
+        # Search Tools
+        "find_component_id",
+        "search",
+        # Storage Tools
+        "get_tables",
+        "get_buckets",
+        "update_descriptions",
+        # Local Tools
+        "request_credentials",
+        "fetch_website",
+        "search_internet",
+    ]
+
+    def test_all_tool_names_can_be_parsed(self):
+        """Test that all backend tool names can be parsed in tool call events."""
+        for tool_name in self.TOOL_NAMES:
+            data = {
+                "type": "tool-input-start",
+                "toolCallId": f"call-{tool_name}",
+                "toolName": tool_name,
+            }
+            event = parse_sse_event(data)
+            assert isinstance(event, ToolCallEvent)
+            assert event.tool_name == tool_name
+
+    def test_all_tool_names_with_output(self):
+        """Test that all backend tools can return output."""
+        for tool_name in self.TOOL_NAMES:
+            data = {
+                "type": "tool-output-available",
+                "toolCallId": f"call-{tool_name}",
+                "toolName": tool_name,
+                "output": {
+                    "result": f"Result from {tool_name}",
+                    "_toolName": tool_name,
+                    "_timestamp": "2025-01-15T10:00:00Z",
+                },
+            }
+            event = parse_sse_event(data)
+            assert isinstance(event, ToolCallEvent)
+            assert event.state == "output-available"
+            assert event.output["_toolName"] == tool_name
 
 
 class TestSSEStreamParser:

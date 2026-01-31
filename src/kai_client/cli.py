@@ -122,10 +122,16 @@ def info(ctx):
             click.echo(f"App: {response.app_name} v{response.app_version}")
             click.echo(f"Server: v{response.server_version}")
             click.echo(f"Uptime: {response.uptime:.1f}s")
-            click.echo(f"Connected MCP servers: {len(response.connected_mcp)}")
-            for mcp in response.connected_mcp:
+            # Handle connected_mcp being either a list or a single dict
+            mcp_list = response.connected_mcp
+            if isinstance(mcp_list, dict):
+                mcp_list = [mcp_list]  # Wrap single dict in a list
+            click.echo(f"Connected MCP servers: {len(mcp_list)}")
+            for mcp in mcp_list:
                 if isinstance(mcp, dict):
-                    click.echo(f"  - {mcp.get('name', 'unknown')}: {mcp.get('status', 'unknown')}")
+                    name = mcp.get("name") or mcp.get("url", "unknown")
+                    status = mcp.get("status", "unknown")
+                    click.echo(f"  - {name}: {status}")
 
     run_async(_info())
 
@@ -233,6 +239,8 @@ async def display_tool_result_events(
             elif event.type == "tool-call" and event.state == "output-available":
                 tool_name = event.tool_name or approved_tool_name
                 click.echo(f"\n[{tool_name} completed]", nl=False)
+            elif event.type == "tool-output-error":
+                click.echo(f"\n[Tool Error: {event.error_text}]", err=True)
             elif event.type == "finish":
                 click.echo()
                 break
@@ -277,6 +285,8 @@ async def send_and_display(
                     # Tool completed, clear pending approval if this was the pending tool
                     if pending_approval and pending_approval.tool_call_id == event.tool_call_id:
                         pending_approval = None
+            elif event.type == "tool-output-error":
+                click.echo(f"\n[Tool Error: {event.error_text}]", err=True)
             elif event.type == "finish":
                 if not json_output:
                     click.echo()  # Final newline

@@ -1236,3 +1236,315 @@ class TestGetVotesFormats:
         assert len(votes) == 1
 
 
+class TestToolOutputError:
+    """Tests for handling tool output error events."""
+
+    @pytest.mark.asyncio
+    async def test_tool_output_error_event(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test that tool-output-error events are properly streamed."""
+        tool_error_event = (
+            '{"type":"tool-output-error","toolCallId":"tool-123",'
+            '"errorText":"Tool execution failed: Connection timeout"}'
+        )
+        sse_response = (
+            f'data: {tool_error_event}\n'
+            'data: {"type":"text","text":"The tool failed. Let me try another approach."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = []
+            async for event in client.send_message("chat-123", "Test"):
+                events.append(event)
+
+        assert len(events) == 3
+        assert events[0].type == "tool-output-error"
+        assert events[0].tool_call_id == "tool-123"
+        assert events[0].error_text == "Tool execution failed: Connection timeout"
+        assert events[1].type == "text"
+        assert events[2].type == "finish"
+
+    @pytest.mark.asyncio
+    async def test_tool_output_error_after_confirmation(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test tool error after user confirmation."""
+        sse_response = (
+            'data: {"type":"tool-output-error","toolCallId":"tool-456",'
+            '"errorText":"No execute function found for tool create_bucket"}\n'
+            'data: {"type":"text","text":"I encountered an error with that tool."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = []
+            async for event in client.confirm_tool(
+                chat_id="chat-123",
+                tool_call_id="tool-456",
+                tool_name="create_bucket",
+            ):
+                events.append(event)
+
+        # Should receive error event followed by text and finish
+        assert events[0].type == "tool-output-error"
+        assert "No execute function found" in events[0].error_text
+
+
+class TestToolApprovalWorkflow:
+    """Tests for complete tool approval workflow scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_full_tool_approval_workflow(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test complete workflow: message -> tool call -> approval -> result."""
+        # First response: tool call waiting for approval
+        first_response = (
+            'data: {"type":"text","text":"I will create a bucket for you."}\n'
+            'data: {"type":"tool-input-start","toolCallId":"call-001","toolName":"create_bucket"}\n'
+            'data: {"type":"tool-input-available","toolCallId":"call-001",'
+            '"toolName":"create_bucket","input":{"name":"test-bucket"}}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        # Second response: after approval
+        second_response = (
+            'data: {"type":"tool-output-available","toolCallId":"call-001",'
+            '"toolName":"create_bucket","output":{"bucket_id":"in.c-test"}}\n'
+            'data: {"type":"text","text":"I created the bucket successfully."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=first_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            # First message: should receive tool call waiting for approval
+            events = []
+            pending_tool = None
+            async for event in client.send_message("chat-123", "Create a bucket"):
+                events.append(event)
+                if event.type == "tool-call" and event.state == "input-available":
+                    pending_tool = event
+
+            assert pending_tool is not None
+            assert pending_tool.tool_name == "create_bucket"
+
+            # Add second response for confirmation
+            httpx_mock.add_response(
+                url="http://localhost:3000/api/chat",
+                method="POST",
+                content=second_response.encode(),
+                headers={"content-type": "text/event-stream"},
+            )
+
+            # Confirm the tool
+            confirm_events = []
+            async for event in client.confirm_tool(
+                chat_id="chat-123",
+                tool_call_id=pending_tool.tool_call_id,
+                tool_name=pending_tool.tool_name,
+            ):
+                confirm_events.append(event)
+
+            # Should receive output-available with result
+            assert confirm_events[0].type == "tool-call"
+            assert confirm_events[0].state == "output-available"
+            assert confirm_events[0].output["bucket_id"] == "in.c-test"
+
+    @pytest.mark.asyncio
+    async def test_tool_denial_workflow(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test workflow when user denies tool execution."""
+        # Response after denial
+        denial_response = (
+            'data: {"type":"tool-output-available","toolCallId":"call-002",'
+            '"toolName":"delete_bucket","output":{"_declined":true,'
+            '"message":"User declined to execute the tool call."}}\n'
+            'data: {"type":"text","text":"Understood, I won\'t delete the bucket."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=denial_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            events = []
+            async for event in client.deny_tool(
+                chat_id="chat-123",
+                tool_call_id="call-002",
+                tool_name="delete_bucket",
+            ):
+                events.append(event)
+
+            # Should receive declined output
+            assert events[0].type == "tool-call"
+            assert events[0].output["_declined"] is True
+
+    @pytest.mark.asyncio
+    async def test_multiple_tool_calls_in_sequence(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test handling multiple sequential tool calls."""
+        sse_response = (
+            'data: {"type":"text","text":"I will query the tables."}\n'
+            # First tool call (pre-approved, no confirmation needed)
+            'data: {"type":"tool-input-start","toolCallId":"call-001","toolName":"get_tables"}\n'
+            'data: {"type":"tool-output-available","toolCallId":"call-001",'
+            '"toolName":"get_tables","output":{"tables":["users","orders"]}}\n'
+            # Second tool call (pre-approved)
+            'data: {"type":"tool-input-start","toolCallId":"call-002","toolName":"get_buckets"}\n'
+            'data: {"type":"tool-output-available","toolCallId":"call-002",'
+            '"toolName":"get_buckets","output":{"buckets":["in.c-main"]}}\n'
+            'data: {"type":"text","text":"Found 2 tables and 1 bucket."}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            tool_calls = []
+            async for event in client.send_message("chat-123", "List my data"):
+                if event.type == "tool-call":
+                    tool_calls.append(event)
+
+            # Should have 4 tool events (2 started + 2 output-available)
+            assert len(tool_calls) == 4
+            # First tool
+            assert tool_calls[0].tool_name == "get_tables"
+            assert tool_calls[0].state == "started"
+            assert tool_calls[1].state == "output-available"
+            # Second tool
+            assert tool_calls[2].tool_name == "get_buckets"
+            assert tool_calls[3].output["buckets"] == ["in.c-main"]
+
+
+class TestAllBackendTools:
+    """Tests to verify client can handle all backend tool types."""
+
+    # Preapproved tools (read-only) from backend
+    PREAPPROVED_TOOLS = [
+        "get_components",
+        "get_config_examples",
+        "get_configs",
+        "docs_query",
+        "get_flow_examples",
+        "get_flow_schema",
+        "get_flows",
+        "get_jobs",
+        "get_data_apps",
+        "get_project_info",
+        "query_data",
+        "find_component_id",
+        "search",
+        "get_buckets",
+        "get_tables",
+    ]
+
+    # Write tools (require confirmation) from backend
+    WRITE_TOOLS = [
+        "add_config_row",
+        "create_config",
+        "create_sql_transformation",
+        "update_config",
+        "update_config_row",
+        "update_sql_transformation",
+        "create_flow",
+        "create_conditional_flow",
+        "update_flow",
+        "run_job",
+        "create_oauth_url",
+        "deploy_data_app",
+        "modify_data_app",
+        "update_descriptions",
+    ]
+
+    @pytest.mark.asyncio
+    async def test_preapproved_tool_flow(self, client: KaiClient, httpx_mock: HTTPXMock):
+        """Test that preapproved tools return output directly."""
+        for tool_name in self.PREAPPROVED_TOOLS[:3]:  # Test first 3
+            sse_response = (
+                f'data: {{"type":"tool-input-start","toolCallId":"call-{tool_name}",'
+                f'"toolName":"{tool_name}"}}\n'
+                f'data: {{"type":"tool-output-available","toolCallId":"call-{tool_name}",'
+                f'"toolName":"{tool_name}","output":{{"result":"data"}}}}\n'
+                'data: {"type":"finish","finishReason":"stop"}\n'
+            )
+
+            httpx_mock.add_response(
+                url="http://localhost:3000/api/chat",
+                method="POST",
+                content=sse_response.encode(),
+                headers={"content-type": "text/event-stream"},
+            )
+
+            async with client:
+                events = []
+                async for event in client.send_message(f"chat-{tool_name}", "Test"):
+                    events.append(event)
+
+                # Find tool output event
+                output_events = [e for e in events if e.type == "tool-call"
+                                 and getattr(e, 'state', None) == "output-available"]
+                assert len(output_events) == 1
+                assert output_events[0].tool_name == tool_name
+
+    @pytest.mark.asyncio
+    async def test_write_tool_requires_approval(
+        self, client: KaiClient, httpx_mock: HTTPXMock
+    ):
+        """Test that write tools wait for approval (input-available state)."""
+        tool_name = "create_config"
+        sse_response = (
+            f'data: {{"type":"tool-input-start","toolCallId":"call-{tool_name}",'
+            f'"toolName":"{tool_name}"}}\n'
+            f'data: {{"type":"tool-input-available","toolCallId":"call-{tool_name}",'
+            f'"toolName":"{tool_name}","input":{{"name":"new-config"}}}}\n'
+            'data: {"type":"finish","finishReason":"stop"}\n'
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:3000/api/chat",
+            method="POST",
+            content=sse_response.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+        async with client:
+            pending_tools = []
+            async for event in client.send_message("chat-123", "Create config"):
+                if event.type == "tool-call" and getattr(event, 'state', None) == "input-available":
+                    pending_tools.append(event)
+
+            # Should have a pending tool awaiting approval
+            assert len(pending_tools) == 1
+            assert pending_tools[0].tool_name == tool_name
+            assert pending_tools[0].input is not None
+
+

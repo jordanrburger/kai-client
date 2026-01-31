@@ -327,6 +327,30 @@ class TestSSEEventModels:
         assert event.message == "Something went wrong"
         assert event.code == "internal_error"
 
+    def test_tool_output_error_event(self):
+        from kai_client.models import ToolOutputErrorEvent
+
+        event = ToolOutputErrorEvent(
+            type="tool-output-error",
+            toolCallId="call-123",
+            errorText="Tool execution failed: Connection timeout",
+        )
+        assert event.type == "tool-output-error"
+        assert event.tool_call_id == "call-123"
+        assert event.error_text == "Tool execution failed: Connection timeout"
+
+    def test_tool_output_error_event_serialization(self):
+        from kai_client.models import ToolOutputErrorEvent
+
+        event = ToolOutputErrorEvent(
+            type="tool-output-error",
+            toolCallId="call-456",
+            errorText="No execute function found",
+        )
+        data = event.model_dump(by_alias=True)
+        assert data["toolCallId"] == "call-456"
+        assert data["errorText"] == "No execute function found"
+
 
 class TestErrorResponse:
     """Tests for ErrorResponse model."""
