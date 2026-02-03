@@ -1,0 +1,5 @@
+{
+  "name": "kai-cli",
+  "version": "1.0.0",
+  "description": "Claude Code plugin providing guidance for using the Kai CLI - the command-line interface for the Keboola AI Assistant"
+}
