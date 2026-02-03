@@ -457,6 +457,82 @@ uv run pytest --cov=kai_client
 uv run pytest tests/test_client.py
 ```
 
+## Claude Code Plugin
+
+This repository includes a [Claude Code](https://claude.com/claude-code) plugin that teaches Claude how to use the Kai CLI correctly.
+
+### Installation
+
+#### Option 1: Download directly (no clone required)
+
+Download the plugin to your Claude Code plugins directory:
+
+```bash
+# Create plugins directory if it doesn't exist
+mkdir -p ~/.claude/plugins
+
+# Download the plugin using curl
+curl -L https://github.com/jordanrburger/kai-client/archive/refs/heads/main.tar.gz | \
+  tar -xz --strip-components=2 -C ~/.claude/plugins kai-client-main/plugins/kai-cli
+```
+
+Or using wget:
+
+```bash
+mkdir -p ~/.claude/plugins
+wget -qO- https://github.com/jordanrburger/kai-client/archive/refs/heads/main.tar.gz | \
+  tar -xz --strip-components=2 -C ~/.claude/plugins kai-client-main/plugins/kai-cli
+```
+
+#### Option 2: Clone and link (for development)
+
+```bash
+# Clone the repository
+git clone https://github.com/jordanrburger/kai-client.git
+cd kai-client
+
+# Option A: Run Claude Code with the plugin directory
+claude --plugin-dir plugins/kai-cli
+
+# Option B: Symlink to your plugins directory for persistent access
+ln -s "$(pwd)/plugins/kai-cli" ~/.claude/plugins/kai-cli
+```
+
+#### Verify Installation
+
+After installation, the plugin should be available in Claude Code. Ask Claude to "use kai" or "help me with kai cli" to trigger the skill.
+
+### What the Plugin Provides
+
+The plugin includes a skill that activates when you ask Claude to:
+- "use kai" or "run kai command"
+- "chat with Keboola AI" or "query Keboola"
+- "list tables", "check kai history"
+- "interact with Keboola assistant"
+
+It teaches Claude about:
+- **Environment setup** - Setting `STORAGE_API_TOKEN` and `STORAGE_API_URL`
+- **Core commands** - `ping`, `info`, `chat`, `history`, `get-chat`, `delete-chat`, `vote`
+- **Tool approval** - Interactive prompts vs `--auto-approve` for write operations
+- **Scripting** - Using `--json-output` for automation
+
+### Plugin Structure
+
+```
+plugins/kai-cli/
+├── .claude-plugin/
+│   └── plugin.json              # Plugin manifest
+└── skills/
+    └── kai-cli/
+        ├── SKILL.md             # Main skill guide
+        ├── references/
+        │   ├── api-details.md   # Python API documentation
+        │   └── sse-events.md    # SSE event types reference
+        └── examples/
+            ├── basic-chat.sh    # Basic usage examples
+            └── workflow-automation.sh
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
