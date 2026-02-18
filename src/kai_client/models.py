@@ -39,6 +39,17 @@ class ToolResultPart(BaseModel):
     result: Any
 
 
+class ToolApprovalResponsePart(BaseModel):
+    """Response to a tool approval request (Vercel AI SDK v6)."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    type: Literal["tool-approval-response"] = "tool-approval-response"
+    approval_id: str = Field(alias="approvalId")
+    approved: bool
+    reason: Optional[str] = None
+
+
 class ToolCallPart(BaseModel):
     """A tool call in progress or completed."""
 
@@ -54,7 +65,7 @@ class ToolCallPart(BaseModel):
 
 # Discriminated union for message parts
 MessagePart = Annotated[
-    Union[TextPart, StepStartPart, ToolResultPart, ToolCallPart],
+    Union[TextPart, StepStartPart, ToolResultPart, ToolApprovalResponsePart, ToolCallPart],
     Field(discriminator="type"),
 ]
 
@@ -93,7 +104,7 @@ class MessageRequest(BaseModel):
 
     id: str
     role: Literal["user"] = "user"
-    parts: list[Union[TextPart, ToolResultPart]]
+    parts: list[Union[TextPart, ToolResultPart, ToolApprovalResponsePart]]
     metadata: Optional[MessageMetadata] = None
 
 
@@ -241,6 +252,16 @@ class StepStartEvent(BaseSSEEvent):
     type: Literal["step-start"] = "step-start"
 
 
+class ToolApproval(BaseModel):
+    """Approval metadata attached to a tool call event."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    approved: Optional[bool] = None
+    reason: Optional[str] = None
+
+
 class ToolCallEvent(BaseSSEEvent):
     """Tool call event from the stream."""
 
@@ -252,6 +273,7 @@ class ToolCallEvent(BaseSSEEvent):
     state: str
     input: Optional[dict[str, Any]] = None
     output: Optional[dict[str, Any]] = None
+    approval: Optional[ToolApproval] = None
 
 
 class FinishEvent(BaseSSEEvent):

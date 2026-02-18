@@ -12,6 +12,7 @@ from kai_client.models import (
     SSEEvent,
     StepStartEvent,
     TextEvent,
+    ToolApproval,
     ToolCallEvent,
     ToolOutputErrorEvent,
     UnknownEvent,
@@ -20,6 +21,18 @@ from kai_client.models import (
 # =============================================================================
 # Individual Event Parsers
 # =============================================================================
+
+
+def _parse_approval(data: dict[str, Any]) -> ToolApproval | None:
+    """Parse the approval field from a tool call event, if present."""
+    approval_data = data.get("approval")
+    if approval_data and isinstance(approval_data, dict) and "id" in approval_data:
+        return ToolApproval(
+            id=approval_data["id"],
+            approved=approval_data.get("approved"),
+            reason=approval_data.get("reason"),
+        )
+    return None
 
 
 def _parse_text_event(data: dict[str, Any]) -> TextEvent:
@@ -54,6 +67,7 @@ def _parse_tool_call_event(data: dict[str, Any]) -> ToolCallEvent:
         state=data.get("state", ""),
         input=data.get("input"),
         output=data.get("output"),
+        approval=_parse_approval(data),
     )
 
 
@@ -78,6 +92,7 @@ def _parse_tool_input_available_event(data: dict[str, Any]) -> ToolCallEvent:
         state="input-available",
         input=data.get("input"),
         output=None,
+        approval=_parse_approval(data),
     )
 
 

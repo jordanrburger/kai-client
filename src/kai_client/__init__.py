@@ -53,6 +53,8 @@ from kai_client.models import (
     StepStartEvent,
     TextEvent,
     TextPart,
+    ToolApproval,
+    ToolApprovalResponsePart,
     ToolCallEvent,
     ToolCallPart,
     ToolOutputErrorEvent,
@@ -71,7 +73,7 @@ from kai_client.types import (
     VoteType,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
     # Main client
@@ -92,6 +94,7 @@ __all__ = [
     "VoteRequest",
     "TextPart",
     "ToolResultPart",
+    "ToolApprovalResponsePart",
     "ToolCallPart",
     "MessageMetadata",
     "RequestContext",
@@ -109,6 +112,7 @@ __all__ = [
     "SSEEvent",
     "TextEvent",
     "StepStartEvent",
+    "ToolApproval",
     "ToolCallEvent",
     "ToolOutputErrorEvent",
     "FinishEvent",

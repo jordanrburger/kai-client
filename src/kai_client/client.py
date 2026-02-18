@@ -26,6 +26,7 @@ from kai_client.models import (
     RequestContext,
     SSEEvent,
     TextPart,
+    ToolApprovalResponsePart,
     ToolResultPart,
     Vote,
     VoteRequest,
@@ -448,6 +449,139 @@ class KaiClient:
             async for event in parse_sse_stream(response):
                 yield event
 
+    async def send_tool_approval_response(
+        self,
+        chat_id: str,
+        approval_id: str,
+        approved: bool,
+        *,
+        reason: Optional[str] = None,
+        visibility: str | VisibilityType = VisibilityType.PRIVATE,
+        branch_id: Optional[int] = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """
+        Respond to a tool approval request (Vercel AI SDK v6 approval flow).
+
+        When the AI requests to execute a tool that requires approval, the
+        stream emits a tool-call event with state "approval-requested" and
+        an approval.id. Use this method to approve or deny the tool execution.
+
+        Args:
+            chat_id: The chat session ID.
+            approval_id: The approval ID from the tool-call event's approval.id field.
+            approved: Whether to approve (True) or deny (False) the tool call.
+            reason: Optional reason for the decision.
+            visibility: Chat visibility (should match the original request).
+            branch_id: Optional Keboola branch ID.
+
+        Yields:
+            SSE events from the continued response stream.
+
+        Example:
+            ```python
+            chat_id = client.new_chat_id()
+            async for event in client.send_message(chat_id, "Create a new bucket"):
+                if event.type == "tool-call" and event.state == "approval-requested":
+                    # Tool requires approval - approve it
+                    async for result_event in client.approve_tool(
+                        chat_id=chat_id,
+                        approval_id=event.approval.id,
+                    ):
+                        if result_event.type == "text":
+                            print(result_event.text, end="")
+                elif event.type == "text":
+                    print(event.text, end="")
+            ```
+        """
+        request = ChatRequest(
+            id=chat_id,
+            message=MessageRequest(
+                id=self.new_message_id(),
+                role="user",
+                parts=[
+                    ToolApprovalResponsePart(
+                        type="tool-approval-response",
+                        approval_id=approval_id,
+                        approved=approved,
+                        reason=reason,
+                    )
+                ],
+            ),
+            selected_chat_model="chat-model",
+            selected_visibility_type=_normalize_visibility(visibility),
+            branch_id=branch_id,
+        )
+
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        async with self._stream_request("POST", "/api/chat", json=payload) as response:
+            async for event in parse_sse_stream(response):
+                yield event
+
+    async def approve_tool(
+        self,
+        chat_id: str,
+        approval_id: str,
+        *,
+        reason: Optional[str] = None,
+        visibility: str | VisibilityType = VisibilityType.PRIVATE,
+        branch_id: Optional[int] = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """
+        Approve a pending tool call and continue the stream.
+
+        Args:
+            chat_id: The chat session ID.
+            approval_id: The approval ID from the tool-call event's approval.id field.
+            reason: Optional reason for approval.
+            visibility: Chat visibility.
+            branch_id: Optional Keboola branch ID.
+
+        Yields:
+            SSE events from the continued response stream.
+        """
+        async for event in self.send_tool_approval_response(
+            chat_id=chat_id,
+            approval_id=approval_id,
+            approved=True,
+            reason=reason,
+            visibility=visibility,
+            branch_id=branch_id,
+        ):
+            yield event
+
+    async def reject_tool(
+        self,
+        chat_id: str,
+        approval_id: str,
+        *,
+        reason: Optional[str] = None,
+        visibility: str | VisibilityType = VisibilityType.PRIVATE,
+        branch_id: Optional[int] = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """
+        Reject a pending tool call and continue the stream.
+
+        Args:
+            chat_id: The chat session ID.
+            approval_id: The approval ID from the tool-call event's approval.id field.
+            reason: Optional reason for rejection.
+            visibility: Chat visibility.
+            branch_id: Optional Keboola branch ID.
+
+        Yields:
+            SSE events from the continued response stream.
+        """
+        async for event in self.send_tool_approval_response(
+            chat_id=chat_id,
+            approval_id=approval_id,
+            approved=False,
+            reason=reason,
+            visibility=visibility,
+            branch_id=branch_id,
+        ):
+            yield event
+
     async def send_tool_result(
         self,
         chat_id: str,
@@ -459,42 +593,24 @@ class KaiClient:
         branch_id: Optional[int] = None,
     ) -> AsyncIterator[SSEEvent]:
         """
-        Send a tool result to confirm or deny a pending tool call.
+        Send a tool result (legacy method, prefer send_tool_approval_response).
 
-        When the AI requests to execute a tool that requires approval (like
-        write operations), the stream will pause with a tool-call event in
-        "input-available" state. Use this method to approve or deny the tool
-        execution and continue the stream.
+        .. deprecated::
+            Use send_tool_approval_response / approve_tool / reject_tool instead.
+            This method uses the old tool-result protocol which can cause empty
+            user message errors with the Vercel AI SDK v6 backend.
 
         Args:
             chat_id: The chat session ID.
-            tool_call_id: The ID of the tool call to respond to (from the event).
-            tool_name: The name of the tool (from the event).
-            result: The result to send - typically "confirmed" or "denied".
-            visibility: Chat visibility (should match the original request).
+            tool_call_id: The ID of the tool call to respond to.
+            tool_name: The name of the tool.
+            result: The result to send.
+            visibility: Chat visibility.
             branch_id: Optional Keboola branch ID.
 
         Yields:
             SSE events from the continued response stream.
-
-        Example:
-            ```python
-            chat_id = client.new_chat_id()
-            async for event in client.send_message(chat_id, "Create a new bucket"):
-                if event.type == "tool-call" and event.state == "input-available":
-                    # Tool requires approval - confirm it
-                    async for result_event in client.confirm_tool(
-                        chat_id=chat_id,
-                        tool_call_id=event.tool_call_id,
-                        tool_name=event.tool_name,
-                    ):
-                        if result_event.type == "text":
-                            print(result_event.text, end="")
-                elif event.type == "text":
-                    print(event.text, end="")
-            ```
         """
-        # Build the request with a tool-result part
         request = ChatRequest(
             id=chat_id,
             message=MessageRequest(
@@ -514,7 +630,6 @@ class KaiClient:
             branch_id=branch_id,
         )
 
-        # Serialize with aliases
         payload = request.model_dump(by_alias=True, exclude_none=True)
 
         async with self._stream_request("POST", "/api/chat", json=payload) as response:
@@ -531,19 +646,10 @@ class KaiClient:
         branch_id: Optional[int] = None,
     ) -> AsyncIterator[SSEEvent]:
         """
-        Confirm a pending tool call and continue the stream.
+        Confirm a pending tool call (legacy method, prefer approve_tool).
 
-        This is a convenience method that calls send_tool_result with "confirmed".
-
-        Args:
-            chat_id: The chat session ID.
-            tool_call_id: The ID of the tool call to confirm.
-            tool_name: The name of the tool.
-            visibility: Chat visibility.
-            branch_id: Optional Keboola branch ID.
-
-        Yields:
-            SSE events from the continued response stream.
+        .. deprecated::
+            Use approve_tool instead for the v6 approval flow.
         """
         async for event in self.send_tool_result(
             chat_id=chat_id,
@@ -565,20 +671,10 @@ class KaiClient:
         branch_id: Optional[int] = None,
     ) -> AsyncIterator[SSEEvent]:
         """
-        Deny a pending tool call and continue the stream.
+        Deny a pending tool call (legacy method, prefer reject_tool).
 
-        This is a convenience method that calls send_tool_result with "denied".
-        The AI will typically acknowledge the denial and may suggest alternatives.
-
-        Args:
-            chat_id: The chat session ID.
-            tool_call_id: The ID of the tool call to deny.
-            tool_name: The name of the tool.
-            visibility: Chat visibility.
-            branch_id: Optional Keboola branch ID.
-
-        Yields:
-            SSE events from the continued response stream.
+        .. deprecated::
+            Use reject_tool instead for the v6 approval flow.
         """
         async for event in self.send_tool_result(
             chat_id=chat_id,

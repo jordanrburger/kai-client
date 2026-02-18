@@ -59,10 +59,15 @@ class ToolCallState(str, Enum):
 
     STARTED = "started"
     INPUT_AVAILABLE = "input-available"
+    INPUT_STREAMING = "input-streaming"
     OUTPUT_AVAILABLE = "output-available"
     OUTPUT_ERROR = "output-error"
+    OUTPUT_DENIED = "output-denied"
     STREAMING = "streaming"
     DONE = "done"
+    # Vercel AI SDK v6 approval states
+    APPROVAL_REQUESTED = "approval-requested"
+    APPROVAL_RESPONDED = "approval-responded"
 
 
 # Type aliases for common patterns
