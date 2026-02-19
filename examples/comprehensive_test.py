@@ -96,7 +96,10 @@ async def main():
         try:
             info = await client.info()
             dur = time.time() - t0
-            details = f"App: {info.app_name} v{info.app_version}, MCP servers: {len(info.connected_mcp)}"
+            details = (
+                f"App: {info.app_name} v{info.app_version}, "
+                f"MCP servers: {len(info.connected_mcp)}"
+            )
             record("Server Info", True, dur, details)
             print(f"         {details}")
         except Exception as e:
@@ -130,7 +133,7 @@ async def main():
             )
             print(f"         Events seen: {event_types_seen}")
             print(f"         Response preview: {full_response[:120]}...")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Streaming Chat - General Knowledge", False, dur, traceback.format_exc())
 
@@ -152,7 +155,7 @@ async def main():
                 f"Chat ID: {chat_id_2[:8]}..., Response: {len(response)} chars",
             )
             print(f"         Response preview: {response[:120]}...")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Non-Streaming Chat", False, dur, traceback.format_exc())
 
@@ -186,7 +189,7 @@ async def main():
                 f"Follow-up response: '{follow_up[:80]}'",
             )
             print(f"         Follow-up: {follow_up[:80]}")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Multi-turn Conversation", False, dur, traceback.format_exc())
 
@@ -207,7 +210,7 @@ async def main():
                 f"Chat ID matches: {chat_detail.id == chat_id_3}, Messages: {msg_count}",
             )
             print(f"         Messages in chat: {msg_count}")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Get Chat Details", False, dur, traceback.format_exc())
 
@@ -227,7 +230,7 @@ async def main():
                 f"Chats returned: {len(history.chats)}, has_more: {history.has_more}",
             )
             print(f"         Chats returned: {len(history.chats)}, has_more: {history.has_more}")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Chat History", False, dur, traceback.format_exc())
 
@@ -238,7 +241,9 @@ async def main():
         t0 = time.time()
         try:
             _, sql_response = await client.chat(
-                "Write a simple SQL query that selects all columns from a table called 'orders' where the amount is greater than 100. Just the SQL, no explanation."
+                "Write a simple SQL query that selects all columns from a "
+                "table called 'orders' where the amount is greater than 100. "
+                "Just the SQL, no explanation."
             )
             dur = time.time() - t0
             passed = "select" in sql_response.lower() and "orders" in sql_response.lower()
@@ -249,7 +254,7 @@ async def main():
                 f"Response: {sql_response[:120]}",
             )
             print(f"         Response: {sql_response[:120]}")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Domain-Specific Question (SQL)", False, dur, traceback.format_exc())
 
@@ -287,7 +292,7 @@ async def main():
             )
             print(f"         Tool calls: {tool_events[:3]}")
             print(f"         Response preview: {full_text[:120]}...")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Tool-Triggering Question", False, dur, traceback.format_exc())
 
@@ -317,7 +322,7 @@ async def main():
             )
             print(f"         Event types: {all_event_types}")
             print(f"         Total events: {all_events_count}")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("SSE Event Type Coverage", False, dur, traceback.format_exc())
 
@@ -336,7 +341,7 @@ async def main():
             except Exception:
                 record("Delete Chat", True, dur, f"Chat {chat_id_1[:8]}... deleted successfully")
                 print(f"         Deleted chat {chat_id_1[:8]}...")
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Delete Chat", False, dur, traceback.format_exc())
 

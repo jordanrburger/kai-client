@@ -26,7 +26,6 @@ from kai_client.models import (
     RequestContext,
     SSEEvent,
     TextPart,
-    ToolApprovalResponsePart,
     ToolResultPart,
     Vote,
     VoteRequest,

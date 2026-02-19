@@ -120,12 +120,13 @@ async def main():
             details = (
                 f"Event types: {event_types}\n"
                 f"All tool transitions: {all_tool_info}\n"
-                f"Pending tools (need approval): {[(t.tool_name, t.tool_call_id[:12]) for t in pending_tools]}\n"
+                f"Pending tools (need approval): "
+                f"{[(t.tool_name, t.tool_call_id[:12]) for t in pending_tools]}\n"
                 f"Text: {''.join(text_parts)[:100]}"
             )
             record("Detect Pending Approval", has_pending, dur, details)
 
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Detect Pending Approval", False, dur, traceback.format_exc())
             pending_tools = []
@@ -149,7 +150,10 @@ async def main():
                 deny_events = []
 
                 if has_v6_approval:
-                    print(f"      Using v6 flow: reject_tool(approval_id={pending.approval.id[:12]}...)")
+                    print(
+                        f"      Using v6 flow: reject_tool("
+                        f"approval_id={pending.approval.id[:12]}...)"
+                    )
                     async for event in client.reject_tool(
                         chat_id=chat_id_1,
                         approval_id=pending.approval.id,
@@ -159,7 +163,10 @@ async def main():
                         if event.type == "text":
                             deny_text.append(event.text)
                 else:
-                    print(f"      Using legacy flow: deny_tool(tool_call_id={pending.tool_call_id[:12]}...)")
+                    print(
+                        f"      Using legacy flow: deny_tool("
+                        f"tool_call_id={pending.tool_call_id[:12]}...)"
+                    )
                     async for event in client.deny_tool(
                         chat_id=chat_id_1,
                         tool_call_id=pending.tool_call_id,
@@ -182,7 +189,7 @@ async def main():
                     f"Events after denial: {deny_event_types}\n"
                     f"Response: {deny_response[:150]}",
                 )
-            except Exception as e:
+            except Exception:
                 dur = time.time() - t0
                 record("Deny Tool", False, dur, traceback.format_exc())
         else:
@@ -239,7 +246,10 @@ async def main():
                 approve_events = []
 
                 if has_v6_approval:
-                    print(f"      Using v6 flow: approve_tool(approval_id={pending.approval.id[:12]}...)")
+                    print(
+                        f"      Using v6 flow: approve_tool("
+                        f"approval_id={pending.approval.id[:12]}...)"
+                    )
                     async for event in client.approve_tool(
                         chat_id=chat_id_2,
                         approval_id=pending.approval.id,
@@ -249,7 +259,10 @@ async def main():
                         if event.type == "text":
                             approve_text.append(event.text)
                 else:
-                    print(f"      Using legacy flow: confirm_tool(tool_call_id={pending.tool_call_id[:12]}...)")
+                    print(
+                        f"      Using legacy flow: confirm_tool("
+                        f"tool_call_id={pending.tool_call_id[:12]}...)"
+                    )
                     async for event in client.confirm_tool(
                         chat_id=chat_id_2,
                         tool_call_id=pending.tool_call_id,
@@ -280,7 +293,7 @@ async def main():
                     f"Response: {approve_response[:150]}",
                 )
 
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Approve Tool", False, dur, traceback.format_exc())
 
@@ -309,7 +322,7 @@ async def main():
                 dur,
                 f"Messages: {msg_count}, Tool parts found: {tool_parts_found}",
             )
-        except Exception as e:
+        except Exception:
             dur = time.time() - t0
             record("Verify Tool Execution (get_chat)", False, dur, traceback.format_exc())
 
