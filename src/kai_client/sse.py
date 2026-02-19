@@ -13,6 +13,7 @@ from kai_client.models import (
     StepStartEvent,
     TextEvent,
     ToolApproval,
+    ToolApprovalRequestEvent,
     ToolCallEvent,
     ToolOutputErrorEvent,
     UnknownEvent,
@@ -134,6 +135,15 @@ def _parse_tool_output_error_event(data: dict[str, Any]) -> ToolOutputErrorEvent
     )
 
 
+def _parse_tool_approval_request_event(data: dict[str, Any]) -> ToolApprovalRequestEvent:
+    """Parse a tool-approval-request event (Vercel AI SDK v6 approval flow)."""
+    return ToolApprovalRequestEvent(
+        type="tool-approval-request",
+        approvalId=data.get("approvalId", ""),
+        toolCallId=data.get("toolCallId", ""),
+    )
+
+
 # =============================================================================
 # Event Parser Dispatch Table
 # =============================================================================
@@ -148,6 +158,7 @@ EVENT_PARSERS: dict[str, Callable[[dict[str, Any]], SSEEvent]] = {
     "tool-input-available": _parse_tool_input_available_event,
     "tool-output-available": _parse_tool_output_available_event,
     "tool-output-error": _parse_tool_output_error_event,
+    "tool-approval-request": _parse_tool_approval_request_event,
     "finish": _parse_finish_event,
     "finish-step": _parse_finish_event,
     "error": _parse_error_event,
