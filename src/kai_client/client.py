@@ -462,13 +462,15 @@ class KaiClient:
         """
         Respond to a tool approval request (Vercel AI SDK v6 approval flow).
 
-        When the AI requests to execute a tool that requires approval, the
-        stream emits a tool-call event with state "approval-requested" and
-        an approval.id. Use this method to approve or deny the tool execution.
+        This works by fetching the chat, finding the assistant message that
+        contains the tool call requiring approval, updating its state to
+        ``approval-responded``, and re-sending the updated assistant message
+        to the backend. This mirrors how the Keboola frontend handles tool
+        approvals.
 
         Args:
             chat_id: The chat session ID.
-            approval_id: The approval ID from the tool-call event's approval.id field.
+            approval_id: The approval ID from the ToolApprovalRequestEvent.
             approved: Whether to approve (True) or deny (False) the tool call.
             reason: Optional reason for the decision.
             visibility: Chat visibility (should match the original request).
@@ -480,39 +482,78 @@ class KaiClient:
         Example:
             ```python
             chat_id = client.new_chat_id()
-            async for event in client.send_message(chat_id, "Create a new bucket"):
-                if event.type == "tool-call" and event.state == "approval-requested":
-                    # Tool requires approval - approve it
-                    async for result_event in client.approve_tool(
-                        chat_id=chat_id,
-                        approval_id=event.approval.id,
-                    ):
-                        if result_event.type == "text":
-                            print(result_event.text, end="")
+            pending_approval_id = None
+            async for event in client.send_message(chat_id, "Update descriptions"):
+                if event.type == "tool-approval-request":
+                    pending_approval_id = event.approval_id
                 elif event.type == "text":
                     print(event.text, end="")
+
+            if pending_approval_id:
+                async for event in client.approve_tool(
+                    chat_id=chat_id,
+                    approval_id=pending_approval_id,
+                ):
+                    if event.type == "text":
+                        print(event.text, end="")
             ```
         """
-        request = ChatRequest(
-            id=chat_id,
-            message=MessageRequest(
-                id=self.new_message_id(),
-                role="user",
-                parts=[
-                    ToolApprovalResponsePart(
-                        type="tool-approval-response",
-                        approval_id=approval_id,
-                        approved=approved,
-                        reason=reason,
-                    )
-                ],
-            ),
-            selected_chat_model="chat-model",
-            selected_visibility_type=_normalize_visibility(visibility),
-            branch_id=branch_id,
-        )
+        # Fetch the chat to get the latest assistant message with the tool call
+        chat = await self.get_chat(chat_id)
 
-        payload = request.model_dump(by_alias=True, exclude_none=True)
+        # Find the assistant message containing the tool call with this approval ID
+        assistant_msg = None
+        for msg in reversed(chat.messages):
+            if msg.role != "assistant":
+                continue
+            for part in msg.parts:
+                if (
+                    isinstance(part, dict)
+                    and part.get("approval", {}).get("id") == approval_id
+                ):
+                    assistant_msg = msg
+                    break
+            if assistant_msg:
+                break
+
+        if not assistant_msg:
+            raise KaiError(
+                message=f"Could not find assistant message with approval ID {approval_id}",
+                code="approval:not_found",
+            )
+
+        # Update the tool call part: state → approval-responded, approval.approved → value
+        updated_parts = []
+        for part in assistant_msg.parts:
+            if (
+                isinstance(part, dict)
+                and part.get("approval", {}).get("id") == approval_id
+            ):
+                updated_part = {**part}
+                updated_part["state"] = "approval-responded"
+                updated_part["approval"] = {
+                    "id": approval_id,
+                    "approved": approved,
+                }
+                if reason is not None:
+                    updated_part["approval"]["reason"] = reason
+                updated_parts.append(updated_part)
+            else:
+                updated_parts.append(part)
+
+        # Build payload: send the updated assistant message back
+        payload: dict[str, Any] = {
+            "id": chat_id,
+            "message": {
+                "id": assistant_msg.id,
+                "role": "assistant",
+                "parts": updated_parts,
+            },
+            "selectedChatModel": "chat-model",
+            "selectedVisibilityType": _normalize_visibility(visibility),
+        }
+        if branch_id is not None:
+            payload["branchId"] = branch_id
 
         async with self._stream_request("POST", "/api/chat", json=payload) as response:
             async for event in parse_sse_stream(response):
@@ -798,9 +839,26 @@ class KaiClient:
         response = await self._request("GET", "/api/vote", params={"chatId": chat_id})
         data = response.json()
         # Response might be a list or an object with a votes field
-        if isinstance(data, list):
-            return [Vote.model_validate(v) for v in data]
-        return [Vote.model_validate(v) for v in data.get("votes", [])]
+        items = data if isinstance(data, list) else data.get("votes", [])
+        return [self._parse_vote(v) for v in items]
+
+    @staticmethod
+    def _parse_vote(data: dict) -> Vote:
+        """Parse a vote from either API format.
+
+        The API may return votes as:
+        - {chatId, messageId, type: "up"|"down"} (legacy)
+        - {chatId, messageId, isUpvoted: bool} (current production)
+        """
+        if "type" in data:
+            return Vote.model_validate(data)
+        # Convert isUpvoted format to type format
+        vote_type = "up" if data.get("isUpvoted", False) else "down"
+        return Vote(
+            chat_id=data.get("chatId", ""),
+            message_id=data.get("messageId", ""),
+            type=vote_type,  # type: ignore
+        )
 
     async def vote(
         self,
@@ -819,15 +877,22 @@ class KaiClient:
         Returns:
             The created/updated vote.
         """
+        vote_str = vote_type.value if isinstance(vote_type, VoteType) else vote_type
         request = VoteRequest(
             chat_id=chat_id,
             message_id=message_id,
-            type=vote_type.value if isinstance(vote_type, VoteType) else vote_type,  # type: ignore
+            type=vote_str,  # type: ignore
         )
         payload = request.model_dump(by_alias=True)
 
-        response = await self._request("PATCH", "/api/vote", json=payload)
-        return Vote.model_validate(response.json())
+        await self._request("PATCH", "/api/vote", json=payload)
+        # API returns plain text confirmation, not JSON.
+        # Construct the Vote from the request data.
+        return Vote(
+            chat_id=chat_id,
+            message_id=message_id,
+            type=vote_str,  # type: ignore
+        )
 
     async def upvote(self, chat_id: str, message_id: str) -> Vote:
         """

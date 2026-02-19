@@ -276,6 +276,20 @@ class ToolCallEvent(BaseSSEEvent):
     approval: Optional[ToolApproval] = None
 
 
+class ToolApprovalRequestEvent(BaseSSEEvent):
+    """Tool approval request event from the stream (Vercel AI SDK v6).
+
+    Emitted when a tool call requires explicit user approval before execution.
+    Contains the approval_id needed to approve or reject the tool.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    type: Literal["tool-approval-request"] = "tool-approval-request"
+    approval_id: str = Field(alias="approvalId")
+    tool_call_id: str = Field(alias="toolCallId")
+
+
 class FinishEvent(BaseSSEEvent):
     """Stream finish event."""
 
@@ -318,6 +332,7 @@ SSEEvent = Union[
     TextEvent,
     StepStartEvent,
     ToolCallEvent,
+    ToolApprovalRequestEvent,
     FinishEvent,
     ErrorEvent,
     ToolOutputErrorEvent,

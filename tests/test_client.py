@@ -254,11 +254,7 @@ class TestVoting:
         httpx_mock.add_response(
             url="http://localhost:3000/api/vote",
             method="PATCH",
-            json={
-                "chatId": "chat-123",
-                "messageId": "msg-456",
-                "type": "up",
-            },
+            text="Message voted",
         )
 
         async with client:
@@ -279,11 +275,7 @@ class TestVoting:
         httpx_mock.add_response(
             url="http://localhost:3000/api/vote",
             method="PATCH",
-            json={
-                "chatId": "chat-123",
-                "messageId": "msg-456",
-                "type": "up",
-            },
+            text="Message voted",
         )
 
         async with client:
@@ -296,11 +288,7 @@ class TestVoting:
         httpx_mock.add_response(
             url="http://localhost:3000/api/vote",
             method="PATCH",
-            json={
-                "chatId": "chat-123",
-                "messageId": "msg-456",
-                "type": "down",
-            },
+            text="Message voted",
         )
 
         async with client:
@@ -1062,11 +1050,7 @@ class TestVotingWithEnum:
         httpx_mock.add_response(
             url="http://localhost:3000/api/vote",
             method="PATCH",
-            json={
-                "chatId": "chat-123",
-                "messageId": "msg-456",
-                "type": "up",
-            },
+            text="Message voted",
         )
 
         async with client:

@@ -16,6 +16,7 @@ if _env_local.exists():
     load_dotenv(_env_local)
 
 from kai_client import KaiClient, __version__  # noqa: E402
+from kai_client.models import ToolApprovalRequestEvent  # noqa: E402
 from kai_client.types import VoteType  # noqa: E402
 
 
@@ -262,6 +263,8 @@ async def send_and_display(
 ):
     """Send a message and display the response."""
     pending_approval = None
+    # Track v6 approval request (separate event with approvalId)
+    pending_approval_id: str | None = None
     # Track current tool call to handle null tool_name in output-available events
     current_tool_name: dict[str, str] = {}  # tool_call_id -> tool_name
 
@@ -292,6 +295,11 @@ async def send_and_display(
                     # Tool completed, clear pending approval if this was the pending tool
                     if pending_approval and pending_approval.tool_call_id == event.tool_call_id:
                         pending_approval = None
+                        pending_approval_id = None
+            elif event.type == "tool-approval-request":
+                # v6 approval flow: capture the approval ID
+                if isinstance(event, ToolApprovalRequestEvent):
+                    pending_approval_id = event.approval_id
             elif event.type == "tool-output-error":
                 click.echo(f"\n[Tool Error: {event.error_text}]", err=True)
             elif event.type == "finish":
@@ -308,37 +316,50 @@ async def send_and_display(
             pending_approval.tool_name
             or current_tool_name.get(pending_approval.tool_call_id or "", "unknown")
         )
+
+        # Determine which approval flow to use
+        use_v6 = bool(pending_approval_id)
+
         if auto_approve:
             click.echo("[Auto-approving...]")
-            await display_tool_result_events(
-                client.confirm_tool(
+            if use_v6:
+                stream = client.approve_tool(
+                    chat_id=chat_id,
+                    approval_id=pending_approval_id,
+                )
+            else:
+                stream = client.confirm_tool(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
                     tool_name=approved_tool_name,
-                ),
-                json_output,
-                approved_tool_name,
-            )
+                )
+            await display_tool_result_events(stream, json_output, approved_tool_name)
         elif click.confirm("Approve this tool call?"):
-            await display_tool_result_events(
-                client.confirm_tool(
+            if use_v6:
+                stream = client.approve_tool(
+                    chat_id=chat_id,
+                    approval_id=pending_approval_id,
+                )
+            else:
+                stream = client.confirm_tool(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
                     tool_name=approved_tool_name,
-                ),
-                json_output,
-                approved_tool_name,
-            )
+                )
+            await display_tool_result_events(stream, json_output, approved_tool_name)
         else:
-            await display_tool_result_events(
-                client.deny_tool(
+            if use_v6:
+                stream = client.reject_tool(
+                    chat_id=chat_id,
+                    approval_id=pending_approval_id,
+                )
+            else:
+                stream = client.deny_tool(
                     chat_id=chat_id,
                     tool_call_id=pending_approval.tool_call_id,
                     tool_name=approved_tool_name,
-                ),
-                json_output,
-                approved_tool_name,
-            )
+                )
+            await display_tool_result_events(stream, json_output, approved_tool_name)
 
 
 @main.command()
