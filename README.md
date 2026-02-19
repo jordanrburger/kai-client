@@ -80,63 +80,99 @@ export STORAGE_API_TOKEN="your-keboola-token"
 export STORAGE_API_URL="https://connection.keboola.com"
 ```
 
-### Basic Commands
+The CLI also auto-loads a `.env.local` file from the current directory if present, so you can put your credentials there instead:
 
 ```bash
-# Check server health
-kai ping
-
-# Get server info
-kai info
-
-# Start an interactive chat
-kai chat
-
-# Send a single message
-kai chat -m "What tables do I have?"
-
-# View chat history
-kai history
-
-# Get details of a specific chat
-kai get-chat <chat-id>
-
-# Delete a chat
-kai delete-chat <chat-id>
-
-# Vote on a message
-kai vote <chat-id> <message-id> up
+# .env.local
+STORAGE_API_TOKEN=your-keboola-token
+STORAGE_API_URL=https://connection.keboola.com
 ```
 
-### Chat Options
+### Commands
+
+#### Health & Info
 
 ```bash
-# Auto-approve tool calls (for automation)
-kai chat --auto-approve -m "Create a bucket called test-bucket"
+kai ping              # Check if the server is alive
+kai info              # Show server version, uptime, connected MCP servers
+kai --version         # Show CLI version
+```
+
+#### Chat
+
+```bash
+# Start an interactive chat session
+kai chat
+
+# Send a single message (non-interactive)
+kai chat -m "What tables do I have?"
 
 # Continue an existing conversation
-kai chat --chat-id abc-123 -m "Tell me more about that"
+kai chat --chat-id <chat-id> -m "Tell me more about that"
 
-# Output raw JSON events (for scripting)
+# Auto-approve tool calls (skips interactive confirmation prompts)
+kai chat --auto-approve -m "Create a bucket called test-bucket"
+
+# Output raw JSON events (useful for scripting and piping)
 kai chat --json-output -m "List my tables"
 ```
 
-### Local Development
+In interactive mode, type your messages and press Enter. Type `exit`, `quit`, or press Ctrl+C to end.
 
-For local development, specify a custom base URL:
+**Tool approval:** When Kai calls a write tool (e.g., `update_descriptions`, `run_job`, `create_config`), the CLI pauses and asks you to approve or deny. Use `--auto-approve` to skip this prompt.
+
+#### History & Chat Management
 
 ```bash
+# View recent chat history (default: 10)
+kai history
+
+# Show more chats
+kai history -n 25
+
+# Output history as JSON
+kai history --json-output
+
+# Get full details of a specific chat (including messages)
+kai get-chat <chat-id>
+kai get-chat <chat-id> --json-output
+
+# Delete a chat (prompts for confirmation)
+kai delete-chat <chat-id>
+
+# Delete without confirmation
+kai delete-chat <chat-id> -y
+```
+
+#### Voting
+
+```bash
+# Vote on a message
+kai vote <chat-id> <message-id> up
+kai vote <chat-id> <message-id> down
+
+# Get votes for a chat
+kai get-votes <chat-id>
+kai get-votes <chat-id> --json-output
+```
+
+### Global Options
+
+These options apply to all commands:
+
+```bash
+# Pass credentials directly (instead of env vars)
+kai --token "your-token" --url "https://connection.keboola.com" ping
+
+# Use a custom base URL for local development
 kai --base-url http://localhost:3000 chat -m "Hello"
 ```
 
 ### Help
 
 ```bash
-# General help
-kai --help
-
-# Command-specific help
-kai chat --help
+kai --help              # General help
+kai chat --help         # Command-specific help
 kai history --help
 ```
 
@@ -264,39 +300,44 @@ async with KaiClient(
 
 ### Tool Approval for Write Operations
 
-Some tools (like `create_config`, `run_job`, `create_flow`) require explicit approval before execution:
+Some tools (like `update_descriptions`, `run_job`, `create_config`) require explicit approval before execution. The server sends a `tool-approval-request` event with an `approval_id` that you use to approve or reject.
 
 ```python
+from kai_client import KaiClient, ToolApprovalRequestEvent
+
 async with KaiClient(
     storage_api_token="your-token",
     storage_api_url="https://connection.keboola.com"
 ) as client:
     chat_id = client.new_chat_id()
-    pending_approval = None
+    pending_approval_id = None
 
     async for event in client.send_message(chat_id, "Create a new bucket"):
         if event.type == "text":
             print(event.text, end="")
         elif event.type == "tool-call":
             if event.state == "input-available":
-                # Tool is waiting for approval
                 print(f"\nTool {event.tool_name} needs approval")
-                pending_approval = event
             elif event.state == "output-available":
                 print(f"\nTool {event.tool_name} completed")
+        elif event.type == "tool-approval-request":
+            pending_approval_id = event.approval_id
 
-    # Approve the pending tool call
-    if pending_approval:
-        async for event in client.confirm_tool(
+    # Approve the pending tool
+    if pending_approval_id:
+        async for event in client.approve_tool(
             chat_id=chat_id,
-            tool_call_id=pending_approval.tool_call_id,
-            tool_name=pending_approval.tool_name,
+            approval_id=pending_approval_id,
         ):
             if event.type == "text":
                 print(event.text, end="")
 
-    # Or deny it
-    # async for event in client.deny_tool(chat_id, tool_call_id, tool_name):
+    # Or reject it
+    # async for event in client.reject_tool(
+    #     chat_id=chat_id,
+    #     approval_id=pending_approval_id,
+    #     reason="Not right now",
+    # ):
     #     ...
 ```
 
@@ -385,13 +426,15 @@ KaiClient(
 | Method | Description |
 |--------|-------------|
 | `from_storage_api(...)` | **[Class method]** Create client with auto-discovered URL |
+| `new_chat_id()` | Generate a new UUID for a chat session |
 | `ping()` | Check server health |
 | `info()` | Get server information |
 | `send_message(chat_id, text, ...)` | Send a message and stream response |
-| `send_tool_result(chat_id, tool_call_id, ...)` | Send tool approval/denial result |
-| `confirm_tool(chat_id, tool_call_id, ...)` | Approve a pending tool call |
-| `deny_tool(chat_id, tool_call_id, ...)` | Deny a pending tool call |
-| `chat(text, ...)` | Simple non-streaming chat |
+| `chat(text, ...)` | Simple non-streaming chat (returns text) |
+| `approve_tool(chat_id, approval_id, ...)` | Approve a pending tool call (v6 flow) |
+| `reject_tool(chat_id, approval_id, ...)` | Reject a pending tool call (v6 flow) |
+| `confirm_tool(chat_id, tool_call_id, ...)` | Approve a pending tool call (legacy flow) |
+| `deny_tool(chat_id, tool_call_id, ...)` | Deny a pending tool call (legacy flow) |
 | `get_chat(chat_id)` | Get chat details with messages |
 | `get_history(limit, ...)` | Get chat history |
 | `get_all_history()` | Iterate through all history |
@@ -408,8 +451,12 @@ KaiClient(
 | `text` | Text content | `text`, `state` |
 | `step-start` | Processing step started | - |
 | `tool-call` | Tool being called | `tool_call_id`, `tool_name`, `state`, `input`, `output` |
+| `tool-approval-request` | Tool needs user approval | `approval_id`, `tool_call_id` |
+| `tool-output-error` | Tool execution failed | `tool_call_id`, `error_text` |
 | `finish` | Stream completed | `finish_reason` |
 | `error` | Error occurred | `message`, `code` |
+
+The `tool-call` event has these states: `started`, `input-available` (waiting for approval or auto-executing), `output-available` (completed).
 
 ### Exceptions
 
