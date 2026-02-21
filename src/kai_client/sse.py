@@ -111,9 +111,11 @@ def _parse_tool_output_available_event(data: dict[str, Any]) -> ToolCallEvent:
 
 def _parse_finish_event(data: dict[str, Any]) -> FinishEvent:
     """Parse a finish or finish-step event."""
+    usage = data.get("usage")
     return FinishEvent(
         type="finish",
         finishReason=data.get("finishReason", "stop"),
+        usage=usage if usage else None,
     )
 
 
@@ -268,6 +270,8 @@ class SSEStreamParser:
         self._tool_calls: dict[str, ToolCallEvent] = {}
         self._finished = False
         self._finish_reason: str | None = None
+        self._prompt_tokens: int = 0
+        self._completion_tokens: int = 0
 
     @property
     def text(self) -> str:
@@ -289,6 +293,21 @@ class SSEStreamParser:
         """Get the reason for stream completion."""
         return self._finish_reason
 
+    @property
+    def prompt_tokens(self) -> int:
+        """Get total prompt tokens across all steps."""
+        return self._prompt_tokens
+
+    @property
+    def completion_tokens(self) -> int:
+        """Get total completion tokens across all steps."""
+        return self._completion_tokens
+
+    @property
+    def total_tokens(self) -> int:
+        """Get total tokens (prompt + completion) across all steps."""
+        return self._prompt_tokens + self._completion_tokens
+
     def process_event(self, event: SSEEvent) -> None:
         """
         Process an SSE event and update internal state.
@@ -303,6 +322,9 @@ class SSEStreamParser:
         elif isinstance(event, FinishEvent):
             self._finished = True
             self._finish_reason = event.finish_reason
+            if event.usage:
+                self._prompt_tokens += event.usage.prompt_tokens
+                self._completion_tokens += event.usage.completion_tokens
 
     def reset(self) -> None:
         """Reset the parser state."""
@@ -310,6 +332,8 @@ class SSEStreamParser:
         self._tool_calls.clear()
         self._finished = False
         self._finish_reason = None
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
 
     async def consume_stream(
         self,

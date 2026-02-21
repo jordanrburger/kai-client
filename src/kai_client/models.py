@@ -290,6 +290,15 @@ class ToolApprovalRequestEvent(BaseSSEEvent):
     tool_call_id: str = Field(alias="toolCallId")
 
 
+class UsageInfo(BaseModel):
+    """Token usage information from a finish event."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    prompt_tokens: int = Field(default=0, alias="promptTokens")
+    completion_tokens: int = Field(default=0, alias="completionTokens")
+
+
 class FinishEvent(BaseSSEEvent):
     """Stream finish event."""
 
@@ -297,6 +306,7 @@ class FinishEvent(BaseSSEEvent):
 
     type: Literal["finish"] = "finish"
     finish_reason: str = Field(alias="finishReason")
+    usage: Optional[UsageInfo] = None
 
 
 class ErrorEvent(BaseSSEEvent):
