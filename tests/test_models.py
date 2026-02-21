@@ -317,6 +317,39 @@ class TestSSEEventModels:
     def test_finish_event(self):
         event = FinishEvent(type="finish", finishReason="stop")
         assert event.finish_reason == "stop"
+        assert event.usage is None
+
+    def test_finish_event_with_usage(self):
+        from kai_client.models import UsageInfo
+
+        usage = UsageInfo(promptTokens=100, completionTokens=50)
+        event = FinishEvent(type="finish", finishReason="stop", usage=usage)
+        assert event.usage is not None
+        assert event.usage.prompt_tokens == 100
+        assert event.usage.completion_tokens == 50
+
+    def test_usage_info_defaults(self):
+        from kai_client.models import UsageInfo
+
+        usage = UsageInfo()
+        assert usage.prompt_tokens == 0
+        assert usage.completion_tokens == 0
+
+    def test_usage_info_from_camel_case(self):
+        from kai_client.models import UsageInfo
+
+        usage = UsageInfo.model_validate({"promptTokens": 250, "completionTokens": 75})
+        assert usage.prompt_tokens == 250
+        assert usage.completion_tokens == 75
+
+    def test_usage_info_extra_fields(self):
+        from kai_client.models import UsageInfo
+
+        usage = UsageInfo.model_validate(
+            {"promptTokens": 10, "completionTokens": 5, "totalTokens": 15}
+        )
+        assert usage.prompt_tokens == 10
+        assert usage.completion_tokens == 5
 
     def test_error_event(self):
         event = ErrorEvent(
