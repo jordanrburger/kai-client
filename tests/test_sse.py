@@ -9,6 +9,7 @@ from kai_client.models import (
     ToolCallEvent,
     ToolOutputErrorEvent,
     UnknownEvent,
+    UsageEvent,
     UsageInfo,
 )
 from kai_client.sse import SSEStreamParser, parse_sse_event
@@ -229,6 +230,26 @@ class TestProductionSSEFormats:
         event = parse_sse_event(data)
         assert isinstance(event, FinishEvent)
         assert event.usage is None
+
+    def test_parse_usage_event(self):
+        """Test parsing a standalone usage event from dataStream.write()."""
+        data = {
+            "type": "usage",
+            "usage": {"promptTokens": 500, "completionTokens": 150},
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, UsageEvent)
+        assert event.type == "usage"
+        assert event.usage.prompt_tokens == 500
+        assert event.usage.completion_tokens == 150
+
+    def test_parse_usage_event_empty_usage(self):
+        """Test parsing usage event with missing usage data defaults to 0."""
+        data = {"type": "usage"}
+        event = parse_sse_event(data)
+        assert isinstance(event, UsageEvent)
+        assert event.usage.prompt_tokens == 0
+        assert event.usage.completion_tokens == 0
 
     def test_production_unknown_events_passthrough(self):
         """Test that production-specific events we don't handle are returned as unknown."""
@@ -532,6 +553,35 @@ class TestSSEStreamParser:
         assert parser.prompt_tokens == 300
         assert parser.completion_tokens == 90
         assert parser.total_tokens == 390
+
+    def test_usage_event(self):
+        """Test that standalone UsageEvent updates token counters."""
+        parser = SSEStreamParser()
+
+        usage = UsageInfo(promptTokens=400, completionTokens=120)
+        parser.process_event(UsageEvent(type="usage", usage=usage))
+
+        assert parser.prompt_tokens == 400
+        assert parser.completion_tokens == 120
+        assert parser.total_tokens == 520
+
+    def test_usage_event_accumulates_with_finish(self):
+        """Test that UsageEvent and FinishEvent usage accumulate together."""
+        parser = SSEStreamParser()
+
+        # Usage event from dataStream.write()
+        parser.process_event(UsageEvent(
+            type="usage",
+            usage=UsageInfo(promptTokens=300, completionTokens=80),
+        ))
+
+        # Finish event without usage (current backend behavior)
+        parser.process_event(FinishEvent(type="finish", finishReason="stop"))
+
+        assert parser.prompt_tokens == 300
+        assert parser.completion_tokens == 80
+        assert parser.total_tokens == 380
+        assert parser.finished is True
 
     def test_reset(self):
         parser = SSEStreamParser()

@@ -17,6 +17,8 @@ from kai_client.models import (
     ToolCallEvent,
     ToolOutputErrorEvent,
     UnknownEvent,
+    UsageEvent,
+    UsageInfo,
 )
 
 # =============================================================================
@@ -146,6 +148,18 @@ def _parse_tool_approval_request_event(data: dict[str, Any]) -> ToolApprovalRequ
     )
 
 
+def _parse_usage_event(data: dict[str, Any]) -> UsageEvent:
+    """Parse a usage event emitted by the backend via dataStream.write()."""
+    usage_data = data.get("usage", {})
+    return UsageEvent(
+        type="usage",
+        usage=UsageInfo(
+            promptTokens=usage_data.get("promptTokens", 0),
+            completionTokens=usage_data.get("completionTokens", 0),
+        ),
+    )
+
+
 # =============================================================================
 # Event Parser Dispatch Table
 # =============================================================================
@@ -161,6 +175,7 @@ EVENT_PARSERS: dict[str, Callable[[dict[str, Any]], SSEEvent]] = {
     "tool-output-available": _parse_tool_output_available_event,
     "tool-output-error": _parse_tool_output_error_event,
     "tool-approval-request": _parse_tool_approval_request_event,
+    "usage": _parse_usage_event,
     "finish": _parse_finish_event,
     "finish-step": _parse_finish_event,
     "error": _parse_error_event,
@@ -319,6 +334,9 @@ class SSEStreamParser:
             self._accumulated_text.append(event.text)
         elif isinstance(event, ToolCallEvent):
             self._tool_calls[event.tool_call_id] = event
+        elif isinstance(event, UsageEvent):
+            self._prompt_tokens += event.usage.prompt_tokens
+            self._completion_tokens += event.usage.completion_tokens
         elif isinstance(event, FinishEvent):
             self._finished = True
             self._finish_reason = event.finish_reason

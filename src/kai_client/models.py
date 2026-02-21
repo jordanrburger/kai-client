@@ -299,6 +299,15 @@ class UsageInfo(BaseModel):
     completion_tokens: int = Field(default=0, alias="completionTokens")
 
 
+class UsageEvent(BaseSSEEvent):
+    """Token usage event emitted by the backend via dataStream.write()."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    type: Literal["usage"] = "usage"
+    usage: UsageInfo
+
+
 class FinishEvent(BaseSSEEvent):
     """Stream finish event."""
 
@@ -343,6 +352,7 @@ SSEEvent = Union[
     StepStartEvent,
     ToolCallEvent,
     ToolApprovalRequestEvent,
+    UsageEvent,
     FinishEvent,
     ErrorEvent,
     ToolOutputErrorEvent,
