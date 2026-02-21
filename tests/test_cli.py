@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from kai_client import __version__
 from kai_client.cli import get_client, get_env_or_error, main, run_async
 from kai_client.models import (
     Chat,
@@ -65,7 +66,7 @@ class TestMainGroup:
     def test_version(self, runner):
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.10.0" in result.output
+        assert __version__ in result.output
 
     def test_help(self, runner):
         result = runner.invoke(main, ["--help"])
