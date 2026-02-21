@@ -61,6 +61,8 @@ from kai_client.models import (
     ToolOutputErrorEvent,
     ToolResultPart,
     UnknownEvent,
+    UsageEvent,
+    UsageInfo,
     Vote,
     VoteRequest,
 )
@@ -117,6 +119,8 @@ __all__ = [
     "ToolApprovalRequestEvent",
     "ToolCallEvent",
     "ToolOutputErrorEvent",
+    "UsageEvent",
+    "UsageInfo",
     "FinishEvent",
     "ErrorEvent",
     "UnknownEvent",

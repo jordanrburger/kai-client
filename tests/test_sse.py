@@ -9,6 +9,8 @@ from kai_client.models import (
     ToolCallEvent,
     ToolOutputErrorEvent,
     UnknownEvent,
+    UsageEvent,
+    UsageInfo,
 )
 from kai_client.sse import SSEStreamParser, parse_sse_event
 
@@ -195,6 +197,59 @@ class TestProductionSSEFormats:
         event = parse_sse_event(data)
         assert isinstance(event, FinishEvent)
         assert event.finish_reason == "stop"  # Default
+
+    def test_parse_finish_event_with_usage(self):
+        """Test parsing finish event with token usage data."""
+        data = {
+            "type": "finish",
+            "finishReason": "stop",
+            "usage": {"promptTokens": 150, "completionTokens": 50},
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, FinishEvent)
+        assert event.usage is not None
+        assert event.usage.prompt_tokens == 150
+        assert event.usage.completion_tokens == 50
+
+    def test_parse_finish_step_event_with_usage(self):
+        """Test parsing finish-step event with token usage data."""
+        data = {
+            "type": "finish-step",
+            "finishReason": "stop",
+            "usage": {"promptTokens": 200, "completionTokens": 100},
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, FinishEvent)
+        assert event.usage is not None
+        assert event.usage.prompt_tokens == 200
+        assert event.usage.completion_tokens == 100
+
+    def test_parse_finish_event_without_usage(self):
+        """Test parsing finish event without usage still works."""
+        data = {"type": "finish", "finishReason": "stop"}
+        event = parse_sse_event(data)
+        assert isinstance(event, FinishEvent)
+        assert event.usage is None
+
+    def test_parse_usage_event(self):
+        """Test parsing a data-usage event from dataStream.write()."""
+        data = {
+            "type": "data-usage",
+            "data": {"promptTokens": 500, "completionTokens": 150},
+        }
+        event = parse_sse_event(data)
+        assert isinstance(event, UsageEvent)
+        assert event.type == "data-usage"
+        assert event.usage.prompt_tokens == 500
+        assert event.usage.completion_tokens == 150
+
+    def test_parse_usage_event_empty_data(self):
+        """Test parsing data-usage event with missing data defaults to 0."""
+        data = {"type": "data-usage"}
+        event = parse_sse_event(data)
+        assert isinstance(event, UsageEvent)
+        assert event.usage.prompt_tokens == 0
+        assert event.usage.completion_tokens == 0
 
     def test_production_unknown_events_passthrough(self):
         """Test that production-specific events we don't handle are returned as unknown."""
@@ -385,6 +440,9 @@ class TestSSEStreamParser:
         assert parser.tool_calls == {}
         assert parser.finished is False
         assert parser.finish_reason is None
+        assert parser.prompt_tokens == 0
+        assert parser.completion_tokens == 0
+        assert parser.total_tokens == 0
 
     def test_accumulate_text(self):
         parser = SSEStreamParser()
@@ -458,6 +516,73 @@ class TestSSEStreamParser:
         assert parser.finished is True
         assert parser.finish_reason == "stop"
 
+    def test_finish_event_with_usage(self):
+        parser = SSEStreamParser()
+
+        usage = UsageInfo(promptTokens=100, completionTokens=50)
+        parser.process_event(FinishEvent(type="finish", finishReason="stop", usage=usage))
+
+        assert parser.prompt_tokens == 100
+        assert parser.completion_tokens == 50
+        assert parser.total_tokens == 150
+
+    def test_finish_event_without_usage(self):
+        parser = SSEStreamParser()
+
+        parser.process_event(FinishEvent(type="finish", finishReason="stop"))
+
+        assert parser.prompt_tokens == 0
+        assert parser.completion_tokens == 0
+        assert parser.total_tokens == 0
+
+    def test_token_accumulation_across_steps(self):
+        parser = SSEStreamParser()
+
+        # First step
+        usage1 = UsageInfo(promptTokens=100, completionTokens=30)
+        parser.process_event(FinishEvent(type="finish", finishReason="stop", usage=usage1))
+
+        assert parser.prompt_tokens == 100
+        assert parser.completion_tokens == 30
+        assert parser.total_tokens == 130
+
+        # Second step (e.g., after tool use)
+        usage2 = UsageInfo(promptTokens=200, completionTokens=60)
+        parser.process_event(FinishEvent(type="finish", finishReason="stop", usage=usage2))
+
+        assert parser.prompt_tokens == 300
+        assert parser.completion_tokens == 90
+        assert parser.total_tokens == 390
+
+    def test_usage_event(self):
+        """Test that standalone UsageEvent updates token counters."""
+        parser = SSEStreamParser()
+
+        usage = UsageInfo(promptTokens=400, completionTokens=120)
+        parser.process_event(UsageEvent(type="data-usage", usage=usage))
+
+        assert parser.prompt_tokens == 400
+        assert parser.completion_tokens == 120
+        assert parser.total_tokens == 520
+
+    def test_usage_event_accumulates_with_finish(self):
+        """Test that UsageEvent and FinishEvent usage accumulate together."""
+        parser = SSEStreamParser()
+
+        # Usage event from dataStream.write()
+        parser.process_event(UsageEvent(
+            type="data-usage",
+            usage=UsageInfo(promptTokens=300, completionTokens=80),
+        ))
+
+        # Finish event without usage (current backend behavior)
+        parser.process_event(FinishEvent(type="finish", finishReason="stop"))
+
+        assert parser.prompt_tokens == 300
+        assert parser.completion_tokens == 80
+        assert parser.total_tokens == 380
+        assert parser.finished is True
+
     def test_reset(self):
         parser = SSEStreamParser()
 
@@ -469,7 +594,8 @@ class TestSSEStreamParser:
             toolName="test",
             state="done",
         ))
-        parser.process_event(FinishEvent(type="finish", finishReason="stop"))
+        usage = UsageInfo(promptTokens=500, completionTokens=200)
+        parser.process_event(FinishEvent(type="finish", finishReason="stop", usage=usage))
 
         # Verify data was added
         assert parser.text == "Hello"
@@ -484,6 +610,9 @@ class TestSSEStreamParser:
         assert parser.tool_calls == {}
         assert parser.finished is False
         assert parser.finish_reason is None
+        assert parser.prompt_tokens == 0
+        assert parser.completion_tokens == 0
+        assert parser.total_tokens == 0
 
     def test_tool_calls_returns_copy(self):
         parser = SSEStreamParser()
