@@ -232,20 +232,20 @@ class TestProductionSSEFormats:
         assert event.usage is None
 
     def test_parse_usage_event(self):
-        """Test parsing a standalone usage event from dataStream.write()."""
+        """Test parsing a data-usage event from dataStream.write()."""
         data = {
-            "type": "usage",
-            "usage": {"promptTokens": 500, "completionTokens": 150},
+            "type": "data-usage",
+            "data": {"promptTokens": 500, "completionTokens": 150},
         }
         event = parse_sse_event(data)
         assert isinstance(event, UsageEvent)
-        assert event.type == "usage"
+        assert event.type == "data-usage"
         assert event.usage.prompt_tokens == 500
         assert event.usage.completion_tokens == 150
 
-    def test_parse_usage_event_empty_usage(self):
-        """Test parsing usage event with missing usage data defaults to 0."""
-        data = {"type": "usage"}
+    def test_parse_usage_event_empty_data(self):
+        """Test parsing data-usage event with missing data defaults to 0."""
+        data = {"type": "data-usage"}
         event = parse_sse_event(data)
         assert isinstance(event, UsageEvent)
         assert event.usage.prompt_tokens == 0
@@ -559,7 +559,7 @@ class TestSSEStreamParser:
         parser = SSEStreamParser()
 
         usage = UsageInfo(promptTokens=400, completionTokens=120)
-        parser.process_event(UsageEvent(type="usage", usage=usage))
+        parser.process_event(UsageEvent(type="data-usage", usage=usage))
 
         assert parser.prompt_tokens == 400
         assert parser.completion_tokens == 120
@@ -571,7 +571,7 @@ class TestSSEStreamParser:
 
         # Usage event from dataStream.write()
         parser.process_event(UsageEvent(
-            type="usage",
+            type="data-usage",
             usage=UsageInfo(promptTokens=300, completionTokens=80),
         ))
 

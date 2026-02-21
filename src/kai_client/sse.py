@@ -149,10 +149,14 @@ def _parse_tool_approval_request_event(data: dict[str, Any]) -> ToolApprovalRequ
 
 
 def _parse_usage_event(data: dict[str, Any]) -> UsageEvent:
-    """Parse a usage event emitted by the backend via dataStream.write()."""
-    usage_data = data.get("usage", {})
+    """Parse a data-usage event emitted by the backend via dataStream.write().
+
+    The Vercel AI SDK prefixes custom data types with "data-", so the event
+    arrives as { type: "data-usage", data: { promptTokens, completionTokens } }.
+    """
+    usage_data = data.get("data", {})
     return UsageEvent(
-        type="usage",
+        type="data-usage",
         usage=UsageInfo(
             promptTokens=usage_data.get("promptTokens", 0),
             completionTokens=usage_data.get("completionTokens", 0),
@@ -175,7 +179,7 @@ EVENT_PARSERS: dict[str, Callable[[dict[str, Any]], SSEEvent]] = {
     "tool-output-available": _parse_tool_output_available_event,
     "tool-output-error": _parse_tool_output_error_event,
     "tool-approval-request": _parse_tool_approval_request_event,
-    "usage": _parse_usage_event,
+    "data-usage": _parse_usage_event,
     "finish": _parse_finish_event,
     "finish-step": _parse_finish_event,
     "error": _parse_error_event,

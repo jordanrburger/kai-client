@@ -300,11 +300,15 @@ class UsageInfo(BaseModel):
 
 
 class UsageEvent(BaseSSEEvent):
-    """Token usage event emitted by the backend via dataStream.write()."""
+    """Token usage event emitted by the backend via dataStream.write().
+
+    The Vercel AI SDK prefixes custom data types with "data-", so the
+    SSE event type is "data-usage" with the payload nested under "data".
+    """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    type: Literal["usage"] = "usage"
+    type: Literal["data-usage"] = "data-usage"
     usage: UsageInfo
 
 

@@ -355,8 +355,8 @@ class TestSSEEventModels:
         from kai_client.models import UsageEvent, UsageInfo
 
         usage = UsageInfo(promptTokens=300, completionTokens=75)
-        event = UsageEvent(type="usage", usage=usage)
-        assert event.type == "usage"
+        event = UsageEvent(type="data-usage", usage=usage)
+        assert event.type == "data-usage"
         assert event.usage.prompt_tokens == 300
         assert event.usage.completion_tokens == 75
 
@@ -364,7 +364,7 @@ class TestSSEEventModels:
         from kai_client.models import UsageEvent
 
         event = UsageEvent.model_validate({
-            "type": "usage",
+            "type": "data-usage",
             "usage": {"promptTokens": 600, "completionTokens": 200},
         })
         assert event.usage.prompt_tokens == 600
